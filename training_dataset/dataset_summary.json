@@ -1,0 +1,36 @@
+{
+  "total_samples": 470,
+  "total_duration_seconds": 2951.82,
+  "speakers": {
+    "male_1": {
+      "count": 100,
+      "total_duration": 626.34,
+      "gender": "male"
+    },
+    "male_2": {
+      "count": 97,
+      "total_duration": 611.83,
+      "gender": "male"
+    },
+    "female_1": {
+      "count": 92,
+      "total_duration": 575.98,
+      "gender": "female"
+    },
+    "female_2": {
+      "count": 77,
+      "total_duration": 450.28,
+      "gender": "female"
+    },
+    "male_3_own": {
+      "count": 4,
+      "total_duration": 26.32,
+      "gender": "male"
+    },
+    "female_3_own": {
+      "count": 100,
+      "total_duration": 661.07,
+      "gender": "female"
+    }
+  }
+}

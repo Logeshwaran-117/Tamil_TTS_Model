@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="ta">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fish Speech S2 — Tamil TTS Studio & In-Built Translator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 30px 16px;
+    }
+
+    .studio-wrapper {
+      width: 100%;
+      max-width: 900px;
+    }
+
+    /* Main Card */
+    .editor-card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 20px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.04);
+      padding: 24px 24px 18px 24px;
+      position: relative;
+    }
+
+    /* Top Translator Bar inside Card */
+    .translator-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #f1f5f9;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .translator-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-trans {
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      color: #1e293b;
+      padding: 5px 12px;
+      border-radius: 14px;
+      font-size: 0.76rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+    }
+    .btn-trans:hover {
+      background: #e2e8f0;
+      color: #0f172a;
+      transform: translateY(-1px);
+    }
+    .btn-trans.primary {
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      color: #ffffff;
+      border: none;
+      box-shadow: 0 2px 6px rgba(99, 102, 241, 0.25);
+    }
+    .btn-trans.primary:hover {
+      background: linear-gradient(135deg, #4338ca 0%, #6d28d9 100%);
+      box-shadow: 0 3px 8px rgba(99, 102, 241, 0.35);
+    }
+
+    .auto-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.74rem;
+      font-weight: 500;
+      color: #64748b;
+      cursor: pointer;
+      user-select: none;
+    }
+    .auto-toggle input {
+      accent-color: #6366f1;
+      cursor: pointer;
+    }
+
+    /* Textarea */
+    textarea {
+      width: 100%;
+      min-height: 140px;
+      border: none;
+      outline: none;
+      font-family: inherit;
+      font-size: 1.05rem;
+      color: #0f172a;
+      line-height: 1.6;
+      resize: none;
+      background: transparent;
+    }
+    textarea::placeholder {
+      color: #94a3b8;
+    }
+
+    /* Translation Live Feedback Card */
+    .trans-feedback {
+      display: none;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 10px 14px;
+      margin-top: 10px;
+      margin-bottom: 12px;
+      font-size: 0.82rem;
+      color: #334155;
+      position: relative;
+    }
+    .trans-feedback.show {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .trans-text {
+      flex: 1;
+    }
+    .trans-btn-apply {
+      background: #0f172a;
+      color: #ffffff;
+      border: none;
+      padding: 4px 10px;
+      border-radius: 10px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    /* Quick Preset Prompts */
+    .prompt-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+      margin-bottom: 20px;
+    }
+    .pill {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      padding: 5px 12px;
+      border-radius: 16px;
+      font-size: 0.76rem;
+      color: #64748b;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .pill:hover {
+      background: #f1f5f9;
+      color: #0f172a;
+      border-color: #cbd5e1;
+    }
+
+    /* Bottom Toolbar */
+    .bottom-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid #f1f5f9;
+      padding-top: 16px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .controls-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      position: relative;
+    }
+
+    /* Model Pill */
+    .model-badge {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: #64748b;
+      padding: 6px 12px;
+      border-radius: 20px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+    }
+
+    /* Voice Dropdown Button */
+    .voice-selector-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      padding: 6px 14px 6px 8px;
+      border-radius: 24px;
+      font-size: 0.84rem;
+      font-weight: 600;
+      color: #0f172a;
+      cursor: pointer;
+      transition: all 0.15s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .voice-selector-btn:hover {
+      border-color: #cbd5e1;
+      background: #f8fafc;
+    }
+    .avatar-circle {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.72rem;
+    }
+
+    /* Options Button */
+    .more-options-btn {
+      background: transparent;
+      border: none;
+      font-size: 0.8rem;
+      color: #64748b;
+      cursor: pointer;
+      padding: 6px 8px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .more-options-btn:hover {
+      color: #0f172a;
+      background: #f1f5f9;
+    }
+
+    /* Voice Dropdown Menu */
+    .dropdown-menu {
+      position: absolute;
+      bottom: 50px;
+      left: 80px;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      box-shadow: 0 12px 36px rgba(0,0,0,0.12);
+      width: 280px;
+      padding: 8px;
+      display: none;
+      z-index: 100;
+    }
+    .dropdown-menu.show { display: block; }
+    .dropdown-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #94a3b8;
+      padding: 6px 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .dropdown-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 10px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .dropdown-item:hover {
+      background: #f8fafc;
+    }
+    .dropdown-item.active {
+      background: #f1f5f9;
+      font-weight: 600;
+    }
+    .item-avatar {
+      font-size: 1.1rem;
+    }
+    .item-text {
+      display: flex;
+      flex-direction: column;
+    }
+    .item-name {
+      font-size: 0.82rem;
+      color: #0f172a;
+    }
+    .item-sub {
+      font-size: 0.7rem;
+      color: #64748b;
+    }
+
+    /* Settings Popover */
+    .settings-popover {
+      position: absolute;
+      bottom: 50px;
+      left: 200px;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      box-shadow: 0 12px 36px rgba(0,0,0,0.12);
+      width: 260px;
+      padding: 16px;
+      display: none;
+      z-index: 100;
+    }
+    .settings-popover.show { display: block; }
+    .setting-row {
+      margin-bottom: 12px;
+    }
+    .setting-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.74rem;
+      color: #475569;
+      font-weight: 600;
+      margin-bottom: 5px;
+    }
+    input[type=range] {
+      width: 100%;
+      accent-color: #0f172a;
+    }
+
+    /* Generate Button (ElevenLabs Pill) */
+    .btn-generate {
+      background: #0f172a;
+      color: #ffffff;
+      border: none;
+      padding: 10px 22px;
+      border-radius: 24px;
+      font-size: 0.86rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .btn-generate:hover:not(:disabled) {
+      background: #334155;
+      transform: translateY(-1px);
+    }
+    .btn-generate:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Output Audio Player */
+    .audio-player-card {
+      display: none;
+      margin-top: 16px;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      padding: 14px 18px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.03);
+    }
+    .audio-player-card.show {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    audio {
+      flex: 1;
+      height: 38px;
+      outline: none;
+    }
+    .download-btn {
+      background: #f1f5f9;
+      color: #0f172a;
+      border: 1px solid #e2e8f0;
+      padding: 8px 14px;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .download-btn:hover {
+      background: #e2e8f0;
+    }
+
+    #status {
+      margin-top: 10px;
+      font-size: 0.8rem;
+      text-align: center;
+      color: #64748b;
+    }
+    #status.error { color: #ef4444; }
+    #status.success { color: #10b981; }
+  </style>
+</head>
+<body>
+
+  <div class="studio-wrapper">
+    <!-- Main Clean Editor Card -->
+    <div class="editor-card">
+      
+      <!-- In-Built Translator Action Bar -->
+      <div class="translator-bar">
+        <div class="translator-actions">
+          <button class="btn-trans primary" id="btnTranslate" title="Translate English words/sentences to authentic Tamil">
+            🌐 Translate to Tamil
+          </button>
+          <button class="btn-trans" id="btnTransliterate" title="Convert English phonetic typing (Tanglish) to Tamil script">
+            🔤 Tanglish Phonetic
+          </button>
+          <button class="btn-trans" id="btnClear" title="Clear text">
+            ✕ Clear
+          </button>
+        </div>
+        <label class="auto-toggle" title="Automatically translates English text to Tamil upon clicking Generate">
+          <input type="checkbox" id="autoTranslateToggle" checked />
+          <span>Auto-Translate English</span>
+        </label>
+      </div>
+
+      <textarea
+        id="textInput"
+        placeholder="Type in English (e.g. 'Hello everyone, welcome!'), Tanglish ('Vanakkam'), or native Tamil..."
+      >வணக்கம், நீங்கள் அனைவரும் எப்படி இருக்கிறீர்கள்? இன்று வானிலை மிகவும் இனிமையாகவும் அமைதியாகவும் உள்ளது.</textarea>
+
+      <!-- Translation Live Feedback Bar -->
+      <div class="trans-feedback" id="transFeedback">
+        <div class="trans-text" id="transFeedbackText"></div>
+        <button class="trans-btn-apply" id="btnApplyTrans">Apply Translated Text</button>
+      </div>
+
+      <!-- Quick Preset Prompt Pills -->
+      <div class="prompt-pills">
+        <button class="pill" data-text="வணக்கம்! நீங்கள் அனைவரும் எப்படி இருக்கிறீர்கள்?">👋 Greeting (Tamil)</button>
+        <button class="pill" data-text="Welcome everyone, how are you all doing today?">👋 Greeting (English)</button>
+        <button class="pill" data-text="தமிழ் மொழி உலகிலேயே மிக தொன்மையான செம்மொழிகளில் ஒன்றாகும்.">📖 History</button>
+        <button class="pill" data-text="Artificial intelligence technology is advancing very rapidly across the world.">💡 AI Tech (English)</button>
+        <button class="pill" data-text="naalai kaalai 8 manikku mukkiyamaana kalandhuraiaadal thodangugiradhu">🔤 Tanglish Example</button>
+      </div>
+
+      <!-- Bottom Toolbar (ElevenLabs style) -->
+      <div class="bottom-bar">
+        <div class="controls-left">
+          <!-- Model Badge -->
+          <div class="model-badge">
+            <span>🐟 Fish Speech S2</span>
+          </div>
+
+          <!-- Voice Selector Dropdown -->
+          <button class="voice-selector-btn" id="voiceBtn">
+            <div class="avatar-circle" id="currentAvatar">👩</div>
+            <span id="currentVoiceName">Female 1 - Narrator</span>
+            <span style="color: #94a3b8; font-size: 0.7rem;">▾</span>
+          </button>
+
+          <!-- Voice Dropdown Popover Menu -->
+          <div class="dropdown-menu" id="voiceMenu">
+            <div class="dropdown-title">Select Speaker</div>
+            <div class="dropdown-item active" data-voice="female_1" data-name="Female 1 - Narrator" data-icon="👩">
+              <span class="item-avatar">👩</span>
+              <div class="item-text">
+                <span class="item-name">Female 1</span>
+                <span class="item-sub">Narrator, Expressive</span>
+              </div>
+            </div>
+            <div class="dropdown-item" data-voice="female_2" data-name="Female 2 - Conversational" data-icon="👧">
+              <span class="item-avatar">👧</span>
+              <div class="item-text">
+                <span class="item-name">Female 2</span>
+                <span class="item-sub">Conversational, Cheerful</span>
+              </div>
+            </div>
+            <div class="dropdown-item" data-voice="female_3_own" data-name="Female 3 - Own Voice" data-icon="🎙️">
+              <span class="item-avatar">🎙️</span>
+              <div class="item-text">
+                <span class="item-name">Female 3 (Own Voice)</span>
+                <span class="item-sub">Personalized Custom Voice</span>
+              </div>
+            </div>
+            <div class="dropdown-item" data-voice="male_1" data-name="Male 1 - Narrator" data-icon="🧔">
+              <span class="item-avatar">🧔</span>
+              <div class="item-text">
+                <span class="item-name">Male 1</span>
+                <span class="item-sub">Narrator, Deep, Clear</span>
+              </div>
+            </div>
+            <div class="dropdown-item" data-voice="male_2" data-name="Male 2 - Conversational" data-icon="👨">
+              <span class="item-avatar">👨</span>
+              <div class="item-text">
+                <span class="item-name">Male 2</span>
+                <span class="item-sub">Conversational, Friendly</span>
+              </div>
+            </div>
+            <div class="dropdown-item" data-voice="male_3_own" data-name="Male 3 - Own Voice" data-icon="🎙️">
+              <span class="item-avatar">🎙️</span>
+              <div class="item-text">
+                <span class="item-name">Male 3 (Own Voice)</span>
+                <span class="item-sub">Personalized Custom Voice</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- More Options / Speed Button -->
+          <button class="more-options-btn" id="optionsBtn">
+            ⚙️ Controls ▾
+          </button>
+
+          <!-- Settings Popover (Speed, Emotion, Quality) -->
+          <div class="settings-popover" id="settingsPopover">
+            <div class="setting-row">
+              <div class="setting-header">
+                <span>Speed</span>
+                <span id="speedDisplay" style="color: #6366f1;">1.0x</span>
+              </div>
+              <input type="range" id="speedSlider" min="0.8" max="1.3" step="0.05" value="1.0" />
+            </div>
+            <div class="setting-row">
+              <div class="setting-header">
+                <span>Stability</span>
+                <span id="stabilityDisplay" style="color: #6366f1;">0.75</span>
+              </div>
+              <input type="range" id="stabilitySlider" min="0.3" max="1.0" step="0.05" value="0.75" />
+            </div>
+            <div class="setting-row" style="margin-bottom: 0;">
+              <div class="setting-header">
+                <span>Emotion / Style</span>
+              </div>
+              <select id="emotionSelect" style="width: 100%; padding: 6px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 0.8rem; background: #ffffff;">
+                <option value="neutral">😐 Neutral / Normal</option>
+                <option value="cheerful">😊 Happy & Cheerful</option>
+                <option value="narrator">📖 Storyteller / Drama</option>
+                <option value="formal">👔 Formal / News</option>
+                <option value="surprised">😲 Surprised</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Generate Button -->
+        <button class="btn-generate" id="generateBtn">
+          <span>↑ Generate Speech</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Status feedback -->
+    <div id="status"></div>
+
+    <!-- Generated Audio Player Card -->
+    <div class="audio-player-card" id="audioPlayerCard">
+      <audio id="audioElement" controls></audio>
+      <a id="downloadBtn" class="download-btn" href="#" download="tamil_speech.wav">
+        ⬇️ Download WAV
+      </a>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = (window.location.origin && window.location.origin !== "null" && window.location.origin.startsWith("http"))
+      ? window.location.origin
+      : "http://localhost:5050";
+    let selectedVoice = "female_1";
+
+    const textInput = document.getElementById("textInput");
+    const voiceBtn = document.getElementById("voiceBtn");
+    const voiceMenu = document.getElementById("voiceMenu");
+    const currentAvatar = document.getElementById("currentAvatar");
+    const currentVoiceName = document.getElementById("currentVoiceName");
+    const optionsBtn = document.getElementById("optionsBtn");
+    const settingsPopover = document.getElementById("settingsPopover");
+    const speedSlider = document.getElementById("speedSlider");
+    const speedDisplay = document.getElementById("speedDisplay");
+    const stabilitySlider = document.getElementById("stabilitySlider");
+    const stabilityDisplay = document.getElementById("stabilityDisplay");
+    const emotionSelect = document.getElementById("emotionSelect");
+    const generateBtn = document.getElementById("generateBtn");
+    const statusEl = document.getElementById("status");
+    const audioPlayerCard = document.getElementById("audioPlayerCard");
+    const audioElement = document.getElementById("audioElement");
+    const downloadBtn = document.getElementById("downloadBtn");
+
+    // Translator elements
+    const btnTranslate = document.getElementById("btnTranslate");
+    const btnTransliterate = document.getElementById("btnTransliterate");
+    const btnClear = document.getElementById("btnClear");
+    const autoTranslateToggle = document.getElementById("autoTranslateToggle");
+    const transFeedback = document.getElementById("transFeedback");
+    const transFeedbackText = document.getElementById("transFeedbackText");
+    const btnApplyTrans = document.getElementById("btnApplyTrans");
+
+    let lastTranslatedText = "";
+
+    // Direct client fallback translation
+    async function fallbackClientTranslate(text) {
+      const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ta&dt=t&q=" + encodeURIComponent(text);
+      const res = await fetch(url);
+      const data = await res.json();
+      return data[0].map(part => part[0]).join("").trim();
+    }
+
+    // Translate Function
+    async function performTranslation(mode = "translate") {
+      const text = textInput.value.trim();
+      if (!text) {
+        statusEl.textContent = "Please enter text to translate.";
+        statusEl.className = "error";
+        return;
+      }
+
+      const originalBtnText = mode === "translate" ? btnTranslate.innerHTML : btnTransliterate.innerHTML;
+      if (mode === "translate") btnTranslate.innerHTML = "⏳ Translating...";
+      else btnTransliterate.innerHTML = "⏳ Converting...";
+
+      statusEl.textContent = mode === "translate" ? "Translating English text to Tamil..." : "Converting Tanglish phonetics to Tamil...";
+      statusEl.className = "";
+
+      try {
+        let translatedResult = "";
+        try {
+          const res = await fetch(`${API_BASE}/translate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: text, mode: mode })
+          });
+          const data = await res.json();
+          if (res.ok && data.translated) {
+            translatedResult = data.translated;
+          }
+        } catch (backendErr) {
+          console.warn("Backend /translate fetch failed, using direct client fallback...", backendErr);
+        }
+
+        if (!translatedResult && mode === "translate") {
+          translatedResult = await fallbackClientTranslate(text);
+        }
+
+        if (!translatedResult) {
+          throw new Error("Unable to translate text. Please ensure you are connected to the network.");
+        }
+
+        lastTranslatedText = translatedResult;
+        textInput.value = translatedResult;
+        
+        transFeedbackText.innerHTML = `<strong>✨ Translated to Tamil:</strong> "${translatedResult}"`;
+        transFeedback.classList.add("show");
+
+        statusEl.textContent = "✅ Successfully translated to Tamil script!";
+        statusEl.className = "success";
+      } catch (err) {
+        statusEl.textContent = `❌ Translation error: ${err.message}`;
+        statusEl.className = "error";
+      } finally {
+        if (mode === "translate") btnTranslate.innerHTML = originalBtnText;
+        else btnTransliterate.innerHTML = originalBtnText;
+      }
+    }
+
+    btnTranslate.addEventListener("click", () => performTranslation("translate"));
+    btnTransliterate.addEventListener("click", () => performTranslation("transliterate"));
+    btnClear.addEventListener("click", () => {
+      textInput.value = "";
+      transFeedback.classList.remove("show");
+      statusEl.textContent = "";
+    });
+
+    btnApplyTrans.addEventListener("click", () => {
+      if (lastTranslatedText) {
+        textInput.value = lastTranslatedText;
+      }
+      transFeedback.classList.remove("show");
+    });
+
+    // Toggle Dropdown Menu
+    voiceBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      voiceMenu.classList.toggle("show");
+      settingsPopover.classList.remove("show");
+    });
+
+    // Toggle Settings Popover
+    optionsBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      settingsPopover.classList.toggle("show");
+      voiceMenu.classList.remove("show");
+    });
+
+    // Close on outside click
+    document.addEventListener("click", () => {
+      voiceMenu.classList.remove("show");
+      settingsPopover.classList.remove("show");
+    });
+
+    // Select Voice
+    document.querySelectorAll(".dropdown-item").forEach(item => {
+      item.addEventListener("click", () => {
+        document.querySelectorAll(".dropdown-item").forEach(i => i.classList.remove("active"));
+        item.classList.add("active");
+        selectedVoice = item.dataset.voice;
+        currentAvatar.textContent = item.dataset.icon;
+        currentVoiceName.textContent = item.dataset.name;
+        voiceMenu.classList.remove("show");
+      });
+    });
+
+    // Quick Prompt Pills
+    document.querySelectorAll(".pill").forEach(pill => {
+      pill.addEventListener("click", () => {
+        textInput.value = pill.dataset.text;
+        transFeedback.classList.remove("show");
+      });
+    });
+
+    // Sliders
+    speedSlider.addEventListener("input", (e) => {
+      speedDisplay.textContent = parseFloat(e.target.value).toFixed(2) + "x";
+    });
+    stabilitySlider.addEventListener("input", (e) => {
+      stabilityDisplay.textContent = parseFloat(e.target.value).toFixed(2);
+    });
+
+    // Generate Audio
+    let timerInterval = null;
+    generateBtn.addEventListener("click", async () => {
+      const text = textInput.value.trim();
+      if (!text) {
+        statusEl.textContent = "Please enter text to generate.";
+        statusEl.className = "error";
+        return;
+      }
+
+      generateBtn.disabled = true;
+      let secondsElapsed = 0;
+      generateBtn.innerHTML = `<span>⏳ Synthesizing (0s)...</span>`;
+      statusEl.textContent = "Synthesizing custom Tamil speech on Neural Engine...";
+      statusEl.className = "";
+      audioPlayerCard.classList.remove("show");
+
+      timerInterval = setInterval(() => {
+        secondsElapsed++;
+        generateBtn.innerHTML = `<span>⏳ Synthesizing (${secondsElapsed}s)...</span>`;
+      }, 1000);
+
+      try {
+        const res = await fetch(`${API_BASE}/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: text,
+            voice: selectedVoice,
+            speed: parseFloat(speedSlider.value),
+            stability: parseFloat(stabilitySlider.value),
+            emotion: emotionSelect.value,
+            auto_translate: autoTranslateToggle.checked
+          })
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Generation error");
+
+        if (data.transliterated_text && data.transliterated_text !== text) {
+          transFeedbackText.innerHTML = `<strong>🎙️ Spoken Tamil Script:</strong> "${data.transliterated_text}"`;
+          transFeedback.classList.add("show");
+        }
+
+        const audioSrc = "data:audio/wav;base64," + data.audio_b64;
+        audioElement.src = audioSrc;
+        downloadBtn.href = audioSrc;
+        downloadBtn.download = `${selectedVoice}_speech.wav`;
+
+        audioPlayerCard.classList.add("show");
+        audioElement.play();
+        statusEl.textContent = `✅ Generated successfully in ${secondsElapsed}s!`;
+        statusEl.className = "success";
+      } catch (err) {
+        statusEl.textContent = `❌ ${err.message}`;
+        statusEl.className = "error";
+      } finally {
+        clearInterval(timerInterval);
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = "<span>↑ Generate Speech</span>";
+      }
+    });
+  </script>
+</body>
+</html>
