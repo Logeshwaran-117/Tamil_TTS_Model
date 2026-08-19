@@ -490,8 +490,8 @@ def clone_voice():
         if not files or len(files) == 0:
             return jsonify({"error": "No audio files uploaded"}), 400
 
-        combined_audio = []
-        target_sr = 24000
+        load_whisper()
+        sample_refs = []
 
         for f_idx, file_obj in enumerate(files, 1):
             temp_path = os.path.join(target_dir, f"temp_sample_{f_idx}.wav")
@@ -502,7 +502,7 @@ def clone_voice():
                 if data.ndim > 1:
                     data = np.mean(data, axis=1)
                 
-                # Standardize sample rate if needed
+                # Standardize sample rate to 24kHz
                 if sr != target_sr:
                     num_samples = int(len(data) * (target_sr / sr))
                     data = np.interp(
@@ -510,44 +510,53 @@ def clone_voice():
                         np.arange(len(data)),
                         data
                     )
-                
-                combined_audio.append(data)
-                clip_path = os.path.join(target_dir, f"sample_{f_idx:03d}.wav")
-                sf.write(clip_path, data, samplerate=target_sr)
+
+                # Normalize individual clip
+                clip_peak = np.max(np.abs(data))
+                if clip_peak > 0:
+                    data = (data / clip_peak) * 0.95
+
+                ref_wav_name = f"reference_{f_idx:03d}.wav"
+                ref_txt_name = f"reference_{f_idx:03d}.txt"
+                ref_wav_path = os.path.join(target_dir, ref_wav_name)
+                ref_txt_path = os.path.join(target_dir, ref_txt_name)
+                sf.write(ref_wav_path, data, samplerate=target_sr)
+
+                # Transcribe this specific sample clip with Whisper
+                clip_transcript = ""
+                if whisper_model:
+                    try:
+                        asr_res = whisper_model.transcribe(ref_wav_path, language="ta", fp16=False)
+                        clip_transcript = asr_res.get("text", "").strip()
+                    except Exception as e:
+                        print(f"[Whisper] Sample {f_idx} transcription error: {e}", flush=True)
+
+                if not clip_transcript:
+                    clip_transcript = custom_transcript if custom_transcript else "வணக்கம்"
+
+                with open(ref_txt_path, "w", encoding="utf-8") as f:
+                    f.write(clip_transcript)
+
+                sample_refs.append({
+                    "wav": ref_wav_path,
+                    "txt": clip_transcript,
+                    "duration": round(len(data) / target_sr, 2)
+                })
+                print(f"[Clone] Clip {f_idx:03d} saved: '{ref_wav_name}' ({len(data)/target_sr:.2f}s) -> '{clip_transcript}'", flush=True)
+
             except Exception as e:
-                print(f"[Clone] Error reading audio clip {f_idx}: {e}", flush=True)
+                print(f"[Clone] Error processing sample {f_idx}: {e}", flush=True)
             finally:
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
 
-        if not combined_audio:
+        if not sample_refs:
             return jsonify({"error": "Failed to decode any valid audio files"}), 400
 
-        full_wave = np.concatenate(combined_audio)
-        max_peak = np.max(np.abs(full_wave))
-        if max_peak > 0:
-            full_wave = (full_wave / max_peak) * 0.95
-
-        ref_wav_path = os.path.join(target_dir, "reference.wav")
-        sf.write(ref_wav_path, full_wave, samplerate=target_sr)
-
-        # Transcribe with Whisper if transcript is not provided
-        final_transcript = custom_transcript
-        if not final_transcript:
-            load_whisper()
-            if whisper_model:
-                try:
-                    asr_res = whisper_model.transcribe(ref_wav_path, language="ta", fp16=False)
-                    final_transcript = asr_res.get("text", "").strip()
-                except Exception as e:
-                    print(f"[Whisper] Transcription error: {e}", flush=True)
-                    final_transcript = "வணக்கம், இது எனது குரல் பதிவு."
-            else:
-                final_transcript = "வணக்கம், இது எனது குரல் பதிவு."
-
-        ref_txt_path = os.path.join(target_dir, "transcript.txt")
-        with open(ref_txt_path, "w", encoding="utf-8") as f:
-            f.write(final_transcript)
+        # Set default primary reference to the first clean sample
+        shutil.copyfile(sample_refs[0]["wav"], os.path.join(target_dir, "reference.wav"))
+        with open(os.path.join(target_dir, "transcript.txt"), "w", encoding="utf-8") as f:
+            f.write(sample_refs[0]["txt"])
 
         custom_meta = get_custom_voices_metadata()
         custom_meta[safe_key] = {
@@ -555,20 +564,20 @@ def clone_voice():
             "gender": gender,
             "icon": icon,
             "default_style": "Custom Cloned",
-            "samples_count": len(files),
+            "samples_count": len(sample_refs),
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
         }
         save_custom_voices_metadata(custom_meta)
 
-        print(f"[Clone] ✅ Successfully cloned new voice: '{voice_name}' [{safe_key}] with transcript: '{final_transcript}'", flush=True)
+        print(f"[Clone] ✅ Successfully cloned '{voice_name}' with {len(sample_refs)} distinct reference samples and transcripts!", flush=True)
         return jsonify({
             "success": True,
             "voice_key": safe_key,
             "label": voice_name,
             "gender": gender,
             "icon": icon,
-            "transcript": final_transcript,
-            "duration": round(len(full_wave) / target_sr, 2)
+            "samples_count": len(sample_refs),
+            "primary_transcript": sample_refs[0]["txt"]
         })
 
     except Exception as e:
