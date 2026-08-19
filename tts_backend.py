@@ -57,10 +57,10 @@ torch.compile = lambda x, *args, **kwargs: x
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 
-from fish_speech.models.dac.inference import load_model as load_dac_model
-from fish_speech.models.text2semantic.inference import launch_thread_safe_queue
-from fish_speech.inference_engine import TTSInferenceEngine
-from fish_speech.utils.schema import ServeTTSRequest, ServeReferenceAudio
+from safetensors.torch import load_file
+from vocos import Vocos
+from f5_tts.model import DiT
+from f5_tts.infer.utils_infer import load_model as load_f5_model, infer_batch_process
 
 app = Flask(__name__)
 CORS(app)
@@ -89,48 +89,73 @@ EMOTION_STYLES = {
     "surprised": {"label": "Excited & Surprised", "icon": "😲", "prompt_tag": "[excited]"},
 }
 
-tts_engine = None
+ema_model = None
+vocoder = None
 whisper_model = None
 device = "cpu"
 
 
-def init_tts_engine():
-    """Initializes Fish Speech S2 Dual-AR Transformer & DAC Neural Vocoder into memory."""
-    global tts_engine
-    if tts_engine is not None:
-        return tts_engine
+def find_snapshot(pattern_list):
+    for pat in pattern_list:
+        dirs = glob.glob(pat)
+        if dirs:
+            return dirs[0]
+    return None
 
+
+def load_neural_pipeline():
+    """Load neural TTS foundation model synchronously from local cache with exact weight mapping."""
+    global ema_model, vocoder
     print("\n=======================================================", flush=True)
-    print("  🐟 Initializing Fish Speech S2 Neural Model...", flush=True)
+    print("  Initializing Neural Tamil Speech Model into Memory...", flush=True)
     print("=======================================================", flush=True)
 
-    if not os.path.exists(S2_PRO_DIR) or not os.path.exists(CODEC_PATH):
-        raise RuntimeError(f"Fish Speech S2 weights missing in {S2_PRO_DIR}")
+    indic_snap = find_snapshot([
+        "cache/huggingface/hub/models--ai4bharat--IndicF5/snapshots/*",
+        "cache/**/models--ai4bharat--IndicF5/snapshots/*",
+        os.path.expanduser("~/.cache/huggingface/hub/models--ai4bharat--IndicF5/snapshots/*")
+    ])
+    if not indic_snap:
+        raise RuntimeError("IndicF5 snapshot not found in cache")
 
-    print(" -> Launching Dual-AR LLaMA Transformer queue...", flush=True)
-    llama_queue = launch_thread_safe_queue(
-        checkpoint_path=S2_PRO_DIR,
-        device=device,
-        precision=torch.float32,
-        compile=False
-    )
+    vocab_path = os.path.join(indic_snap, "checkpoints", "vocab.txt")
+    if not os.path.exists(vocab_path):
+        vocab_path = os.path.abspath("checkpoints/vocab.txt")
+    safetensors_path = os.path.join(indic_snap, "model.safetensors")
 
-    print(" -> Loading DAC Neural Vocoder...", flush=True)
-    dac_model = load_dac_model(
-        config_name="modded_dac_vq",
-        checkpoint_path=CODEC_PATH,
+    vocos_snap = find_snapshot([
+        "cache/huggingface/hub/models--charactr--vocos-mel-24khz/snapshots/*",
+        "cache/**/models--charactr--vocos-mel-24khz/snapshots/*",
+        os.path.expanduser("~/.cache/huggingface/hub/models--charactr--vocos-mel-24khz/snapshots/*")
+    ])
+    if not vocos_snap:
+        raise RuntimeError("Vocos snapshot not found in cache")
+
+    vocos_config = os.path.join(vocos_snap, "config.yaml")
+
+    ema_model = load_f5_model(
+        DiT,
+        dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4),
+        mel_spec_type="vocos",
+        vocab_file=vocab_path,
         device=device
     )
 
-    print(" -> Binding TTS Inference Engine...", flush=True)
-    tts_engine = TTSInferenceEngine(
-        llama_queue=llama_queue,
-        decoder_model=dac_model,
-        precision=torch.float32,
-        compile=False
-    )
-    print("✅ Fish Speech S2 Engine is 100% Ready!\n", flush=True)
-    return tts_engine
+    vocoder = Vocos.from_hparams(vocos_config)
+    vocos_state = torch.load(os.path.join(vocos_snap, "pytorch_model.bin"), map_location=device)
+    vocoder.load_state_dict(vocos_state)
+    vocoder.eval()
+
+    state_dict = load_file(safetensors_path, device=device)
+    ema_state = {k.replace("ema_model._orig_mod.", ""): v for k, v in state_dict.items() if k.startswith("ema_model.")}
+    vocoder_state = {k.replace("vocoder._orig_mod.", ""): v for k, v in state_dict.items() if k.startswith("vocoder.")}
+
+    ema_model.load_state_dict(ema_state, strict=True)
+    vocoder.load_state_dict(vocoder_state, strict=False)
+
+    ema_model.eval()
+    vocoder.eval()
+    print(f"\n[Model] ✅ Neural Tamil TTS Model is 100% Ready on: {device}\n", flush=True)
 
 
 def load_whisper():
@@ -325,66 +350,50 @@ def normalize_numbers_in_tamil(text):
 
 def synthesize_speech_fish(text, ref_audio_path, ref_transcript, speed=1.0, quality=30, stability=0.75, emotion="neutral"):
     """
-    Fish Speech S2 Dual-AR Zero-Shot Speech Synthesis:
-    Synthesizes the exact typed Tamil text conditioned on the reference speaker's voice prompt!
+    Fast Neural Speech Synthesis conditioned on reference speaker audio prompt.
+    Synthesizes the exact typed Tamil text conditioned on any speaker profile (including custom cloned voices).
     """
-    engine = init_tts_engine()
+    global ema_model, vocoder
+    if ema_model is None or vocoder is None:
+        load_neural_pipeline()
 
     if not os.path.exists(ref_audio_path):
         raise FileNotFoundError(f"Reference audio not found: {ref_audio_path}")
 
+    # Ensure all numbers are converted to spoken Tamil words
     text = normalize_numbers_in_tamil(text)
     start_time = time.time()
     
-    with open(ref_audio_path, "rb") as f:
-        ref_audio_bytes = f.read()
+    # Load and prepare reference audio tensor (ensure mono 1D channel)
+    ref_wav, sr = sf.read(ref_audio_path)
+    ref_tensor = torch.from_numpy(ref_wav).float()
+    if ref_tensor.ndim == 2:
+        ref_tensor = ref_tensor.mean(dim=-1, keepdim=True).t()
+    elif ref_tensor.ndim == 1:
+        ref_tensor = ref_tensor.unsqueeze(0)
 
     ref_text = ref_transcript.strip() if ref_transcript.strip() else "வணக்கம்"
-    print(f"[Fish Speech S2] Synthesizing speech for text: '{text[:60]}...' with voice: {os.path.basename(ref_audio_path)}", flush=True)
+    print(f"[Speech Engine] Synthesizing speech for text: '{text[:50]}...' with voice: {os.path.basename(ref_audio_path)}", flush=True)
 
-    # Temperature & top_p conditioned by stability
-    temperature = max(0.5, min(0.9, 1.0 - (stability * 0.4)))
-    top_p = max(0.6, min(0.95, 1.0 - (stability * 0.3)))
-
-    req = ServeTTSRequest(
-        text=text,
-        references=[
-            ServeReferenceAudio(
-                audio=ref_audio_bytes,
-                text=ref_text
-            )
-        ],
-        max_new_tokens=0,
-        chunk_length=512,
-        top_p=top_p,
-        repetition_penalty=1.2,
-        temperature=temperature,
-        streaming=False
+    result, _, _ = infer_batch_process(
+        ref_audio=(ref_tensor, sr),
+        ref_text=ref_text,
+        gen_text_batches=[text],
+        model_obj=ema_model,
+        vocoder=vocoder,
+        nfe_step=8,
+        speed=speed,
+        device="cpu"
     )
 
-    final_audio = None
-    target_sr = 24000
-
-    for result in engine.inference(req):
-        if result.code == "final" and result.audio is not None:
-            target_sr, final_audio = result.audio
-            break
-        elif result.code == "error":
-            raise RuntimeError(f"Fish Speech synthesis error: {result.error}")
-
-    if final_audio is None:
-        raise RuntimeError("No audio was returned by Fish Speech S2 neural engine.")
-
-    final_wave = np.asarray(final_audio, dtype=np.float32)
-
-    # Peak normalization
+    final_wave = np.asarray(result, dtype=np.float32)
     max_peak = np.max(np.abs(final_wave))
     if max_peak > 0:
         final_wave = (final_wave / max_peak) * 0.95
 
-    # Write to in-memory WAV buffer
+    sample_rate = 24000
     buf = io.BytesIO()
-    sf.write(buf, final_wave, samplerate=target_sr, format="WAV")
+    sf.write(buf, final_wave, samplerate=sample_rate, format="WAV")
     buf.seek(0)
 
     elapsed = time.time() - start_time
@@ -625,6 +634,7 @@ def generate():
 
 
 if __name__ == "__main__":
+    load_neural_pipeline()
     voices = get_available_voices()
     print("\n" + "=" * 65, flush=True)
     print("🐟 Fish Speech S2 — Tamil TTS & Zero-Shot Voice Cloning Server", flush=True)
