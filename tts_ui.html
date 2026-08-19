@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Fish Speech S2 — Tamil TTS Studio & In-Built Translator</title>
+  <title>Fish Speech S2 — Tamil TTS Studio & Voice Cloning</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -150,23 +150,27 @@
       white-space: nowrap;
     }
 
-    /* Quick Preset Prompts */
+    /* Quick Preset Prompt Pills */
     .prompt-pills {
       display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 10px;
-      margin-bottom: 20px;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+      scrollbar-width: none;
     }
+    .prompt-pills::-webkit-scrollbar { display: none; }
+
     .pill {
       background: #f8fafc;
       border: 1px solid #e2e8f0;
-      padding: 5px 12px;
-      border-radius: 16px;
-      font-size: 0.76rem;
-      color: #64748b;
+      border-radius: 14px;
+      padding: 4px 10px;
+      font-size: 0.73rem;
+      color: #475569;
       cursor: pointer;
-      transition: all 0.15s;
+      white-space: nowrap;
+      transition: all 0.15s ease;
     }
     .pill:hover {
       background: #f1f5f9;
@@ -174,13 +178,14 @@
       border-color: #cbd5e1;
     }
 
-    /* Bottom Toolbar */
+    /* Bottom Bar */
     .bottom-bar {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      padding-top: 14px;
       border-top: 1px solid #f1f5f9;
-      padding-top: 16px;
+      position: relative;
       flex-wrap: wrap;
       gap: 12px;
     }
@@ -189,64 +194,80 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      position: relative;
+      flex-wrap: wrap;
     }
 
-    /* Model Pill */
     .model-badge {
       display: flex;
       align-items: center;
       gap: 5px;
-      font-size: 0.78rem;
-      font-weight: 500;
-      color: #64748b;
+      background: #eff6ff;
+      border: 1px solid #dbeafe;
+      color: #1e40af;
       padding: 6px 12px;
       border-radius: 20px;
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
+      font-size: 0.76rem;
+      font-weight: 600;
     }
 
-    /* Voice Dropdown Button */
     .voice-selector-btn {
       display: flex;
       align-items: center;
       gap: 8px;
-      background: #ffffff;
+      background: #f8fafc;
       border: 1px solid #e2e8f0;
-      padding: 6px 14px 6px 8px;
-      border-radius: 24px;
-      font-size: 0.84rem;
+      padding: 5px 12px 5px 6px;
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 0.82rem;
       font-weight: 600;
       color: #0f172a;
-      cursor: pointer;
-      transition: all 0.15s;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+      transition: all 0.15s ease;
     }
     .voice-selector-btn:hover {
+      background: #f1f5f9;
       border-color: #cbd5e1;
-      background: #f8fafc;
     }
+
     .avatar-circle {
-      width: 24px;
-      height: 24px;
+      width: 26px;
+      height: 26px;
       border-radius: 50%;
-      background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
-      color: #ffffff;
+      background: #e2e8f0;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 0.72rem;
+      font-size: 0.85rem;
     }
 
-    /* Options Button */
+    .btn-clone-trigger {
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      color: #166534;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 0.76rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+    }
+    .btn-clone-trigger:hover {
+      background: #dcfce7;
+      transform: translateY(-1px);
+    }
+
     .more-options-btn {
       background: transparent;
       border: none;
-      font-size: 0.8rem;
       color: #64748b;
+      font-size: 0.78rem;
+      font-weight: 600;
       cursor: pointer;
       padding: 6px 8px;
-      border-radius: 8px;
+      border-radius: 12px;
       display: flex;
       align-items: center;
       gap: 4px;
@@ -260,12 +281,14 @@
     .dropdown-menu {
       position: absolute;
       bottom: 50px;
-      left: 80px;
+      left: 140px;
       background: #ffffff;
       border: 1px solid #e2e8f0;
       border-radius: 16px;
       box-shadow: 0 12px 36px rgba(0,0,0,0.12);
-      width: 280px;
+      width: 320px;
+      max-height: 380px;
+      overflow-y: auto;
       padding: 8px;
       display: none;
       z-index: 100;
@@ -278,6 +301,9 @@
       padding: 6px 10px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
     .dropdown-item {
       display: flex;
@@ -301,10 +327,22 @@
     .item-text {
       display: flex;
       flex-direction: column;
+      flex: 1;
     }
     .item-name {
       font-size: 0.82rem;
       color: #0f172a;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .item-badge {
+      font-size: 0.65rem;
+      padding: 1px 6px;
+      border-radius: 6px;
+      background: #e0f2fe;
+      color: #0369a1;
+      font-weight: 600;
     }
     .item-sub {
       font-size: 0.7rem;
@@ -315,7 +353,7 @@
     .settings-popover {
       position: absolute;
       bottom: 50px;
-      left: 200px;
+      left: 280px;
       background: #ffffff;
       border: 1px solid #e2e8f0;
       border-radius: 16px;
@@ -342,7 +380,7 @@
       accent-color: #0f172a;
     }
 
-    /* Generate Button (ElevenLabs Pill) */
+    /* Generate Button */
     .btn-generate {
       background: #0f172a;
       color: #ffffff;
@@ -414,6 +452,172 @@
     }
     #status.error { color: #ef4444; }
     #status.success { color: #10b981; }
+
+    /* Modal Dialog */
+    .modal-backdrop {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(15, 23, 42, 0.45);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+    }
+    .modal-backdrop.show {
+      display: flex;
+    }
+    .modal-box {
+      background: #ffffff;
+      border-radius: 20px;
+      width: 100%;
+      max-width: 520px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+      padding: 24px;
+      position: relative;
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .modal-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #0f172a;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-close-modal {
+      background: #f1f5f9;
+      border: none;
+      border-radius: 50%;
+      width: 28px;
+      height: 28px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.9rem;
+      color: #64748b;
+    }
+    .btn-close-modal:hover {
+      background: #e2e8f0;
+      color: #0f172a;
+    }
+    .form-group {
+      margin-bottom: 14px;
+    }
+    .form-label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #334155;
+      margin-bottom: 6px;
+    }
+    .form-input {
+      width: 100%;
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1px solid #cbd5e1;
+      font-size: 0.88rem;
+      outline: none;
+    }
+    .form-input:focus {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+    }
+    .icon-selector {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .icon-opt {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 1.1rem;
+      background: #f8fafc;
+    }
+    .icon-opt.active {
+      border-color: #6366f1;
+      background: #eff6ff;
+    }
+    .audio-dropzone {
+      border: 2px dashed #cbd5e1;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+      background: #f8fafc;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .audio-dropzone:hover {
+      border-color: #6366f1;
+      background: #eff6ff;
+    }
+    .mic-record-box {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      padding: 10px 14px;
+      border-radius: 12px;
+      margin-top: 10px;
+    }
+    .btn-mic {
+      background: #ef4444;
+      color: #ffffff;
+      border: none;
+      padding: 6px 14px;
+      border-radius: 16px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-mic.recording {
+      animation: pulse 1s infinite;
+      background: #dc2626;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.5; }
+      100% { opacity: 1; }
+    }
+    .btn-clone-submit {
+      width: 100%;
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      color: #ffffff;
+      border: none;
+      padding: 11px;
+      border-radius: 14px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 14px;
+      box-shadow: 0 3px 10px rgba(99, 102, 241, 0.25);
+    }
+    .btn-clone-submit:hover:not(:disabled) {
+      background: linear-gradient(135deg, #4338ca 0%, #6d28d9 100%);
+    }
+    .btn-clone-submit:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 <body>
@@ -461,7 +665,7 @@
         <button class="pill" data-text="naalai kaalai 8 manikku mukkiyamaana kalandhuraiaadal thodangugiradhu">🔤 Tanglish Example</button>
       </div>
 
-      <!-- Bottom Toolbar (ElevenLabs style) -->
+      <!-- Bottom Toolbar -->
       <div class="bottom-bar">
         <div class="controls-left">
           <!-- Model Badge -->
@@ -472,54 +676,23 @@
           <!-- Voice Selector Dropdown -->
           <button class="voice-selector-btn" id="voiceBtn">
             <div class="avatar-circle" id="currentAvatar">👩</div>
-            <span id="currentVoiceName">Female 1 - Narrator</span>
+            <span id="currentVoiceName">Female 1 (Narrator)</span>
             <span style="color: #94a3b8; font-size: 0.7rem;">▾</span>
+          </button>
+
+          <!-- Clone Voice Trigger Button -->
+          <button class="btn-clone-trigger" id="btnOpenCloneModal">
+            ➕ Clone New Voice
           </button>
 
           <!-- Voice Dropdown Popover Menu -->
           <div class="dropdown-menu" id="voiceMenu">
-            <div class="dropdown-title">Select Speaker</div>
-            <div class="dropdown-item active" data-voice="female_1" data-name="Female 1 - Narrator" data-icon="👩">
-              <span class="item-avatar">👩</span>
-              <div class="item-text">
-                <span class="item-name">Female 1</span>
-                <span class="item-sub">Narrator, Expressive</span>
-              </div>
+            <div class="dropdown-title">
+              <span>Select Speaker</span>
+              <button style="background:none; border:none; color:#6366f1; cursor:pointer; font-size:0.72rem;" id="btnQuickAddVoice">+ Add Voice</button>
             </div>
-            <div class="dropdown-item" data-voice="female_2" data-name="Female 2 - Conversational" data-icon="👧">
-              <span class="item-avatar">👧</span>
-              <div class="item-text">
-                <span class="item-name">Female 2</span>
-                <span class="item-sub">Conversational, Cheerful</span>
-              </div>
-            </div>
-            <div class="dropdown-item" data-voice="female_3_own" data-name="Female 3 - Own Voice" data-icon="🎙️">
-              <span class="item-avatar">🎙️</span>
-              <div class="item-text">
-                <span class="item-name">Female 3 (Own Voice)</span>
-                <span class="item-sub">Personalized Custom Voice</span>
-              </div>
-            </div>
-            <div class="dropdown-item" data-voice="male_1" data-name="Male 1 - Narrator" data-icon="🧔">
-              <span class="item-avatar">🧔</span>
-              <div class="item-text">
-                <span class="item-name">Male 1</span>
-                <span class="item-sub">Narrator, Deep, Clear</span>
-              </div>
-            </div>
-            <div class="dropdown-item" data-voice="male_2" data-name="Male 2 - Conversational" data-icon="👨">
-              <span class="item-avatar">👨</span>
-              <div class="item-text">
-                <span class="item-name">Male 2</span>
-                <span class="item-sub">Conversational, Friendly</span>
-              </div>
-            </div>
-            <div class="dropdown-item" data-voice="male_3_own" data-name="Male 3 - Own Voice" data-icon="🎙️">
-              <span class="item-avatar">🎙️</span>
-              <div class="item-text">
-                <span class="item-name">Male 3 (Own Voice)</span>
-                <span class="item-sub">Personalized Custom Voice</span>
-              </div>
+            <div id="voiceListContainer">
+              <!-- Dynamically populated from /voices -->
             </div>
           </div>
 
@@ -528,7 +701,7 @@
             ⚙️ Controls ▾
           </button>
 
-          <!-- Settings Popover (Speed, Emotion, Quality) -->
+          <!-- Settings Popover (Speed, Emotion, Stability) -->
           <div class="settings-popover" id="settingsPopover">
             <div class="setting-row">
               <div class="setting-header">
@@ -578,15 +751,91 @@
     </div>
   </div>
 
+  <!-- Voice Cloning Modal -->
+  <div class="modal-backdrop" id="cloneModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span>🎙️ Clone a New Voice</span>
+        </div>
+        <button class="btn-close-modal" id="btnCloseCloneModal">✕</button>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Voice Name / Speaker Label</label>
+        <input type="text" class="form-input" id="cloneVoiceName" placeholder="e.g. My Voice, Vijay, Priya, News Anchor..." />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Gender & Icon</label>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <select class="form-input" id="cloneGender" style="flex: 1;">
+            <option value="female">Female</option>
+            <option value="male">Male</option>
+            <option value="neutral">Neutral</option>
+          </select>
+          <div class="icon-selector" id="iconSelector">
+            <div class="icon-opt active" data-icon="🎙️">🎙️</div>
+            <div class="icon-opt" data-icon="👩">👩</div>
+            <div class="icon-opt" data-icon="👦">👦</div>
+            <div class="icon-opt" data-icon="👨">👨</div>
+            <div class="icon-opt" data-icon="🧔">🧔</div>
+            <div class="icon-opt" data-icon="🌟">🌟</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Upload Sample Audio (1 or more .wav / .mp3 clips)</label>
+        <div class="audio-dropzone" id="audioDropzone">
+          <div style="font-size: 1.5rem; margin-bottom: 4px;">📁</div>
+          <div style="font-size: 0.8rem; color: #475569; font-weight: 600;">Click or Drag Audio Sample(s) here</div>
+          <div style="font-size: 0.7rem; color: #94a3b8; margin-top: 2px;">(Supports 5-15 seconds clear sample audio)</div>
+          <input type="file" id="cloneAudioFiles" multiple accept="audio/*" style="display: none;" />
+        </div>
+        <div id="selectedFilesSummary" style="font-size: 0.75rem; color: #166534; margin-top: 6px; font-weight: 600;"></div>
+      </div>
+
+      <!-- Live Mic Recording Option -->
+      <div class="mic-record-box">
+        <div>
+          <div style="font-size: 0.8rem; font-weight: 600; color: #0f172a;">Or Record from Microphone</div>
+          <div style="font-size: 0.7rem; color: #64748b;" id="micStatusText">Click Record & speak 5-10s in Tamil</div>
+        </div>
+        <button class="btn-mic" id="btnMicRecord">
+          <span>● Record</span>
+        </button>
+      </div>
+
+      <!-- Optional Transcript -->
+      <div class="form-group" style="margin-top: 12px;">
+        <label class="form-label">Sample Speech Transcript (Optional - Whisper will auto-transcribe if empty)</label>
+        <input type="text" class="form-input" id="cloneTranscript" placeholder="வணக்கம், இது எனது மாதிரி குரல் பதிவு..." />
+      </div>
+
+      <button class="btn-clone-submit" id="btnSubmitClone">
+        ✨ Clone & Register Voice
+      </button>
+      <div id="cloneModalStatus" style="font-size: 0.76rem; text-align: center; margin-top: 8px; color: #64748b;"></div>
+    </div>
+  </div>
+
   <script>
     const API_BASE = (window.location.origin && window.location.origin !== "null" && window.location.origin.startsWith("http"))
       ? window.location.origin
       : "http://localhost:5050";
+
     let selectedVoice = "female_1";
+    let selectedIcon = "🎙️";
+    let activeVoices = [];
+    let recordedAudioBlob = null;
+    let mediaRecorder = null;
+    let recordedChunks = [];
 
     const textInput = document.getElementById("textInput");
     const voiceBtn = document.getElementById("voiceBtn");
     const voiceMenu = document.getElementById("voiceMenu");
+    const voiceListContainer = document.getElementById("voiceListContainer");
     const currentAvatar = document.getElementById("currentAvatar");
     const currentVoiceName = document.getElementById("currentVoiceName");
     const optionsBtn = document.getElementById("optionsBtn");
@@ -602,6 +851,22 @@
     const audioElement = document.getElementById("audioElement");
     const downloadBtn = document.getElementById("downloadBtn");
 
+    // Modal elements
+    const btnOpenCloneModal = document.getElementById("btnOpenCloneModal");
+    const btnQuickAddVoice = document.getElementById("btnQuickAddVoice");
+    const cloneModal = document.getElementById("cloneModal");
+    const btnCloseCloneModal = document.getElementById("btnCloseCloneModal");
+    const cloneVoiceName = document.getElementById("cloneVoiceName");
+    const cloneGender = document.getElementById("cloneGender");
+    const cloneAudioFiles = document.getElementById("cloneAudioFiles");
+    const audioDropzone = document.getElementById("audioDropzone");
+    const selectedFilesSummary = document.getElementById("selectedFilesSummary");
+    const btnMicRecord = document.getElementById("btnMicRecord");
+    const micStatusText = document.getElementById("micStatusText");
+    const cloneTranscript = document.getElementById("cloneTranscript");
+    const btnSubmitClone = document.getElementById("btnSubmitClone");
+    const cloneModalStatus = document.getElementById("cloneModalStatus");
+
     // Translator elements
     const btnTranslate = document.getElementById("btnTranslate");
     const btnTransliterate = document.getElementById("btnTransliterate");
@@ -610,10 +875,176 @@
     const transFeedback = document.getElementById("transFeedback");
     const transFeedbackText = document.getElementById("transFeedbackText");
     const btnApplyTrans = document.getElementById("btnApplyTrans");
-
     let lastTranslatedText = "";
 
-    // Direct client fallback translation
+    // Load available voices dynamically
+    async function loadVoices() {
+      try {
+        const res = await fetch(`${API_BASE}/voices`);
+        if (!res.ok) throw new Error("Could not load voices");
+        const data = await res.json();
+        activeVoices = data.voices || [];
+        renderVoiceList();
+      } catch (e) {
+        console.warn("Using default fallback voices:", e);
+      }
+    }
+
+    function renderVoiceList() {
+      voiceListContainer.innerHTML = "";
+      activeVoices.forEach(v => {
+        const item = document.createElement("div");
+        item.className = `dropdown-item ${v.key === selectedVoice ? "active" : ""}`;
+        item.dataset.voice = v.key;
+        item.dataset.name = v.label;
+        item.dataset.icon = v.icon;
+
+        const customBadge = v.is_custom ? `<span class="item-badge">Custom Cloned</span>` : "";
+
+        item.innerHTML = `
+          <span class="item-avatar">${v.icon}</span>
+          <div class="item-text">
+            <span class="item-name">${v.label} ${customBadge}</span>
+            <span class="item-sub">${v.gender}, ${v.style || "Natural"}</span>
+          </div>
+        `;
+
+        item.addEventListener("click", () => {
+          document.querySelectorAll(".dropdown-item").forEach(i => i.classList.remove("active"));
+          item.classList.add("active");
+          selectedVoice = v.key;
+          currentAvatar.textContent = v.icon;
+          currentVoiceName.textContent = v.label;
+          voiceMenu.classList.remove("show");
+        });
+
+        voiceListContainer.appendChild(item);
+      });
+    }
+
+    // Modal controls
+    function openModal() {
+      cloneModal.classList.add("show");
+      cloneModalStatus.textContent = "";
+      voiceMenu.classList.remove("show");
+    }
+    function closeModal() {
+      cloneModal.classList.remove("show");
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+      }
+    }
+
+    btnOpenCloneModal.addEventListener("click", openModal);
+    btnQuickAddVoice.addEventListener("click", openModal);
+    btnCloseCloneModal.addEventListener("click", closeModal);
+
+    // Icon Selector
+    document.querySelectorAll(".icon-opt").forEach(opt => {
+      opt.addEventListener("click", () => {
+        document.querySelectorAll(".icon-opt").forEach(o => o.classList.remove("active"));
+        opt.classList.add("active");
+        selectedIcon = opt.dataset.icon;
+      });
+    });
+
+    // Audio File Dropzone
+    audioDropzone.addEventListener("click", () => cloneAudioFiles.click());
+    cloneAudioFiles.addEventListener("change", () => {
+      const count = cloneAudioFiles.files.length;
+      if (count > 0) {
+        selectedFilesSummary.textContent = `✓ Selected ${count} audio file(s): ${Array.from(cloneAudioFiles.files).map(f=>f.name).join(", ")}`;
+      }
+    });
+
+    // Mic Recording
+    btnMicRecord.addEventListener("click", async () => {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+        btnMicRecord.classList.remove("recording");
+        btnMicRecord.innerHTML = "<span>● Record</span>";
+        micStatusText.textContent = "✓ Audio recording captured!";
+      } else {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          recordedChunks = [];
+          mediaRecorder = new MediaRecorder(stream);
+          mediaRecorder.ondataavailable = e => {
+            if (e.data.size > 0) recordedChunks.push(e.data);
+          };
+          mediaRecorder.onstop = () => {
+            recordedAudioBlob = new Blob(recordedChunks, { type: "audio/wav" });
+            selectedFilesSummary.textContent = "✓ Microphone sample recorded ready for cloning!";
+          };
+          mediaRecorder.start();
+          btnMicRecord.classList.add("recording");
+          btnMicRecord.innerHTML = "<span>■ Stop</span>";
+          micStatusText.textContent = "🎙️ Recording... Speak clearly in Tamil!";
+        } catch (err) {
+          alert("Microphone access error: " + err.message);
+        }
+      }
+    });
+
+    // Submit Voice Clone
+    btnSubmitClone.addEventListener("click", async () => {
+      const name = cloneVoiceName.value.trim();
+      if (!name) {
+        alert("Please enter a name for the voice.");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("name", name);
+      formData.append("gender", cloneGender.value);
+      formData.append("icon", selectedIcon);
+      formData.append("transcript", cloneTranscript.value.trim());
+
+      const files = cloneAudioFiles.files;
+      if (files && files.length > 0) {
+        for (let i = 0; i < files.length; i++) {
+          formData.append("audio_files", files[i]);
+        }
+      } else if (recordedAudioBlob) {
+        formData.append("audio_files", recordedAudioBlob, "mic_recording.wav");
+      } else {
+        alert("Please upload at least 1 audio file or record from microphone.");
+        return;
+      }
+
+      btnSubmitClone.disabled = true;
+      btnSubmitClone.innerHTML = "⏳ Processing & Auto-Transcribing with Whisper...";
+      cloneModalStatus.textContent = "Standardizing audio and extracting acoustic voice features...";
+
+      try {
+        const res = await fetch(`${API_BASE}/clone_voice`, {
+          method: "POST",
+          body: formData
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Cloning failed");
+
+        cloneModalStatus.textContent = "✅ Voice cloned successfully!";
+        await loadVoices();
+        selectedVoice = data.voice_key;
+        currentAvatar.textContent = data.icon;
+        currentVoiceName.textContent = data.label;
+        renderVoiceList();
+
+        setTimeout(() => {
+          closeModal();
+          statusEl.textContent = `🎉 Cloned '${data.label}' ready to speak!`;
+          statusEl.className = "success";
+        }, 800);
+      } catch (err) {
+        cloneModalStatus.textContent = `❌ Error: ${err.message}`;
+      } finally {
+        btnSubmitClone.disabled = false;
+        btnSubmitClone.innerHTML = "✨ Clone & Register Voice";
+      }
+    });
+
+    // Translation logic
     async function fallbackClientTranslate(text) {
       const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ta&dt=t&q=" + encodeURIComponent(text);
       const res = await fetch(url);
@@ -621,7 +1052,6 @@
       return data[0].map(part => part[0]).join("").trim();
     }
 
-    // Translate Function
     async function performTranslation(mode = "translate") {
       const text = textInput.value.trim();
       if (!text) {
@@ -650,7 +1080,7 @@
             translatedResult = data.translated;
           }
         } catch (backendErr) {
-          console.warn("Backend /translate fetch failed, using direct client fallback...", backendErr);
+          console.warn("Backend /translate fetch failed, using fallback...", backendErr);
         }
 
         if (!translatedResult && mode === "translate") {
@@ -658,12 +1088,11 @@
         }
 
         if (!translatedResult) {
-          throw new Error("Unable to translate text. Please ensure you are connected to the network.");
+          throw new Error("Unable to translate text.");
         }
 
         lastTranslatedText = translatedResult;
         textInput.value = translatedResult;
-        
         transFeedbackText.innerHTML = `<strong>✨ Translated to Tamil:</strong> "${translatedResult}"`;
         transFeedback.classList.add("show");
 
@@ -693,36 +1122,22 @@
       transFeedback.classList.remove("show");
     });
 
-    // Toggle Dropdown Menu
+    // Dropdown toggles
     voiceBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       voiceMenu.classList.toggle("show");
       settingsPopover.classList.remove("show");
     });
 
-    // Toggle Settings Popover
     optionsBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       settingsPopover.classList.toggle("show");
       voiceMenu.classList.remove("show");
     });
 
-    // Close on outside click
     document.addEventListener("click", () => {
       voiceMenu.classList.remove("show");
       settingsPopover.classList.remove("show");
-    });
-
-    // Select Voice
-    document.querySelectorAll(".dropdown-item").forEach(item => {
-      item.addEventListener("click", () => {
-        document.querySelectorAll(".dropdown-item").forEach(i => i.classList.remove("active"));
-        item.classList.add("active");
-        selectedVoice = item.dataset.voice;
-        currentAvatar.textContent = item.dataset.icon;
-        currentVoiceName.textContent = item.dataset.name;
-        voiceMenu.classList.remove("show");
-      });
     });
 
     // Quick Prompt Pills
@@ -733,7 +1148,6 @@
       });
     });
 
-    // Sliders
     speedSlider.addEventListener("input", (e) => {
       speedDisplay.textContent = parseFloat(e.target.value).toFixed(2) + "x";
     });
@@ -754,7 +1168,7 @@
       generateBtn.disabled = true;
       let secondsElapsed = 0;
       generateBtn.innerHTML = `<span>⏳ Synthesizing (0s)...</span>`;
-      statusEl.textContent = "Synthesizing custom Tamil speech on Neural Engine...";
+      statusEl.textContent = "Synthesizing custom Tamil speech with Fish Speech S2...";
       statusEl.className = "";
       audioPlayerCard.classList.remove("show");
 
@@ -803,6 +1217,9 @@
         generateBtn.innerHTML = "<span>↑ Generate Speech</span>";
       }
     });
+
+    // Initial load
+    loadVoices();
   </script>
 </body>
 </html>

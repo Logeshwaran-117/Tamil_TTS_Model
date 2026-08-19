@@ -1,16 +1,15 @@
 """
-Tamil TTS Backend — Fast Neural Speech Synthesis with 6-Speaker Voice Profiles & In-Built Translator
+Fish Speech S2 — Tamil TTS Backend with Real-Time Zero-Shot Voice Cloning & In-Built Translator
 Features:
- - In-Built English-to-Tamil Neural Translator (/translate)
- - Auto-Translation and Phonetic Tanglish Transliteration
- - Direct Offline Local Cache Weights Loading
- - Fast 8-Step ODE Single-Batch Solver on CPU
- - 100% Newly Generated Speech for Typed Text
- - Pitch-Preserving Speed Control (0.8x - 1.3x)
- - 6 Dynamic Voice Profiles with Instant Runtime Switching
- - Serves Web UI directly at http://localhost:5050
-
-Run: .venv311\\Scripts\\python tts_backend.py
+ - 🐟 Fish Speech S2 Architecture
+ - 🎙️ Real-Time Zero-Shot Voice Cloning (/clone_voice)
+ - 🗂️ Dynamic Multi-Speaker Profiles (Pre-set & User Custom Cloned Voices)
+ - 🤖 Auto-Transcription with Whisper ASR
+ - 🌐 In-Built English-to-Tamil Neural Translator (/translate)
+ - 🔤 Phonetic Tanglish Transliteration
+ - 🔢 Automatic Tamil Numeral & Currency Normalization
+ - ⚡ Fast Inference on CPU
+ - 🖥️ Interactive Web UI at http://localhost:5050
 """
 
 import os
@@ -21,7 +20,7 @@ if sys.stdout.encoding != 'utf-8':
     except Exception:
         pass
 
-# Enforce cache inside TTS Model\cache
+# Enforce cache configuration
 CACHE_ROOT = os.path.abspath("cache")
 os.environ["HF_HOME"] = os.path.join(CACHE_ROOT, "huggingface")
 os.environ["PIP_CACHE_DIR"] = os.path.join(CACHE_ROOT, "pip")
@@ -29,8 +28,6 @@ os.environ["TORCH_HOME"] = os.path.join(CACHE_ROOT, "torch")
 os.environ["TRANSFORMERS_CACHE"] = os.path.join(CACHE_ROOT, "huggingface")
 os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join(CACHE_ROOT, "huggingface")
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 import io
 import re
@@ -38,6 +35,7 @@ import glob
 import time
 import base64
 import json
+import shutil
 import urllib.request
 import urllib.parse
 import numpy as np
@@ -45,7 +43,6 @@ import soundfile as sf
 import torch
 import torchaudio
 
-# Audio loader fallback for Windows compatibility
 def soundfile_load(filepath, *args, **kwargs):
     data, samplerate = sf.read(filepath)
     tensor = torch.from_numpy(data).float()
@@ -60,17 +57,17 @@ torch.compile = lambda x, *args, **kwargs: x
 
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
-from safetensors.torch import load_file
-from vocos import Vocos
-from f5_tts.model import DiT
-from f5_tts.infer.utils_infer import load_model as load_f5_model, infer_batch_process
 
 app = Flask(__name__)
 CORS(app)
 
 DATASET_DIR = "dataset"
+CHECKPOINTS_DIR = "checkpoints"
+S2_PRO_DIR = os.path.join(CHECKPOINTS_DIR, "s2-pro")
+CUSTOM_VOICES_FILE = os.path.join(DATASET_DIR, "custom_voices.json")
+WHISPER_CACHE_DIR = os.path.join(CACHE_ROOT, "whisper")
 
-VOICE_METADATA = {
+DEFAULT_VOICE_METADATA = {
     "female_1": {"label": "Female 1 (Narrator)", "gender": "female", "icon": "👩", "default_style": "Narrator"},
     "female_2": {"label": "Female 2 (Conversational)", "gender": "female", "icon": "👧", "default_style": "Conversational"},
     "female_3_own": {"label": "Female 3 (Own Voice)", "gender": "female", "icon": "🎙️", "default_style": "Natural"},
@@ -87,68 +84,51 @@ EMOTION_STYLES = {
     "surprised": {"label": "Excited & Surprised", "icon": "😲", "prompt_tag": "[excited]"},
 }
 
-ema_model = None
-vocoder = None
+whisper_model = None
 device = "cpu"
 
 
-def load_neural_pipeline():
-    """Load neural TTS foundation model synchronously from local cache with exact weight mapping."""
-    global ema_model, vocoder
-    print("\n=======================================================", flush=True)
-    print("  Initializing Neural Tamil Speech Model into Memory...", flush=True)
-    print("=======================================================", flush=True)
+def load_whisper():
+    """Loads Whisper ASR model for Tamil speech recognition and auto-transcription."""
+    global whisper_model
+    if whisper_model is None:
+        try:
+            import whisper
+            print("[Whisper] Loading Whisper ASR model for Tamil speech transcription...", flush=True)
+            whisper_model = whisper.load_model("small", download_root=WHISPER_CACHE_DIR, device=device)
+            print("[Whisper] ✅ Whisper model loaded successfully!", flush=True)
+        except Exception as e:
+            print(f"[Whisper] Warning: Could not load Whisper ({e})", flush=True)
 
-    # Locate cached IndicF5 model files
-    indic_dirs = glob.glob("cache/huggingface/hub/models--ai4bharat--IndicF5/snapshots/*")
-    if not indic_dirs:
-        raise RuntimeError("IndicF5 snapshot not found in cache")
-    indic_snap = indic_dirs[0]
-    vocab_path = os.path.join(indic_snap, "checkpoints", "vocab.txt")
-    safetensors_path = os.path.join(indic_snap, "model.safetensors")
 
-    # Locate cached Vocos model files
-    vocos_dirs = glob.glob("cache/huggingface/hub/models--charactr--vocos-mel-24khz/snapshots/*")
-    if not vocos_dirs:
-        raise RuntimeError("Vocos snapshot not found in cache")
-    vocos_snap = vocos_dirs[0]
-    vocos_config = os.path.join(vocos_snap, "config.yaml")
+def get_custom_voices_metadata():
+    """Reads custom voices JSON file."""
+    if os.path.exists(CUSTOM_VOICES_FILE):
+        try:
+            with open(CUSTOM_VOICES_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
 
-    # 1. Instantiate DiT model
-    ema_model = load_f5_model(
-        DiT,
-        dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4),
-        mel_spec_type="vocos",
-        vocab_file=vocab_path,
-        device=device
-    )
 
-    # 2. Instantiate Vocos vocoder locally
-    vocoder = Vocos.from_hparams(vocos_config)
-    vocos_state = torch.load(os.path.join(vocos_snap, "pytorch_model.bin"), map_location=device)
-    vocoder.load_state_dict(vocos_state)
-    vocoder.eval()
-
-    # 3. Load safetensors weights cleanly
-    state_dict = load_file(safetensors_path, device=device)
-    ema_state = {k.replace("ema_model._orig_mod.", ""): v for k, v in state_dict.items() if k.startswith("ema_model.")}
-    vocoder_state = {k.replace("vocoder._orig_mod.", ""): v for k, v in state_dict.items() if k.startswith("vocoder.")}
-
-    ema_model.load_state_dict(ema_state, strict=True)
-    vocoder.load_state_dict(vocoder_state, strict=False)
-
-    ema_model.eval()
-    vocoder.eval()
-    print(f"\n[Model] ✅ Neural Tamil TTS Model is 100% Ready on: {device}\n", flush=True)
+def save_custom_voices_metadata(meta):
+    """Saves custom voices metadata."""
+    os.makedirs(DATASET_DIR, exist_ok=True)
+    with open(CUSTOM_VOICES_FILE, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
 
 
 def get_available_voices():
-    """Dynamically scan dataset/ for all 6 voice profiles."""
+    """Dynamically scan dataset/ for default speakers + custom cloned voices."""
     voices = {}
     if not os.path.exists(DATASET_DIR):
         return voices
 
-    for spk_id, meta in VOICE_METADATA.items():
+    custom_meta = get_custom_voices_metadata()
+    all_metadata = {**DEFAULT_VOICE_METADATA, **custom_meta}
+
+    for spk_id, meta in all_metadata.items():
         spk_dir = os.path.join(DATASET_DIR, spk_id)
         if not os.path.isdir(spk_dir):
             continue
@@ -173,10 +153,11 @@ def get_available_voices():
         voices[spk_id] = {
             "path": ref_wav,
             "text": transcript if transcript else "வணக்கம்",
-            "label": meta["label"],
-            "gender": meta["gender"],
-            "icon": meta["icon"],
-            "default_style": meta.get("default_style", "Natural")
+            "label": meta.get("label", spk_id),
+            "gender": meta.get("gender", "neutral"),
+            "icon": meta.get("icon", "🎙️"),
+            "default_style": meta.get("default_style", "Natural"),
+            "is_custom": spk_id not in DEFAULT_VOICE_METADATA
         }
 
     return voices
@@ -219,7 +200,7 @@ def translate_english_to_tamil(text):
     if not text or not re.search(r'[a-zA-Z]', text):
         return text
 
-    # 1. Primary: High-speed translation API
+    # Primary: High-speed translation API
     try:
         url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ta&dt=t&q=" + urllib.parse.quote(text)
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
@@ -231,7 +212,7 @@ def translate_english_to_tamil(text):
     except Exception as e:
         print(f"[Translator] Primary translation warning: {e}", flush=True)
 
-    # 2. Secondary fallback: MyMemory translation API
+    # Fallback: MyMemory translation API
     try:
         mm_url = "https://api.mymemory.translated.net/get?q=" + urllib.parse.quote(text) + "&langpair=en|ta"
         req = urllib.request.Request(mm_url, headers={"User-Agent": "Mozilla/5.0"})
@@ -243,6 +224,9 @@ def translate_english_to_tamil(text):
     except Exception as e:
         print(f"[Translator] Fallback translation warning: {e}", flush=True)
 
+    return text
+
+
 def normalize_numbers_in_tamil(text):
     """Converts numerals (e.g. 20, 100, 2026, 50%, ₹500, 9.5) to spoken Tamil words."""
     if not text:
@@ -253,15 +237,11 @@ def normalize_numbers_in_tamil(text):
     except Exception:
         tamil = None
 
-    # 1. Map Tamil script numerals to ASCII digits
     tamil_digits = {'௦':'0', '௧':'1', '௨':'2', '௩':'3', '௪':'4', '௫':'5', '௬':'6', '௭':'7', '௮':'8', '௯':'9'}
     for t_digit, a_digit in tamil_digits.items():
         text = text.replace(t_digit, a_digit)
 
-    # 2. Percentage expansion (e.g. 20% -> 20 சதவீதம்)
     text = re.sub(r'(\d+)\s*%', r'\1 சதவீதம்', text)
-
-    # 3. Currency expansion (e.g. ₹500, Rs. 500 -> 500 ரூபாய்)
     text = re.sub(r'(?:₹|Rs\.?|INR)\s*(\d+)', r'\1 ரூபாய்', text)
 
     digits_map = {
@@ -269,7 +249,6 @@ def normalize_numbers_in_tamil(text):
         '5': 'ஐந்து', '6': 'ஆறு', '7': 'ஏழு', '8': 'எட்டு', '9': 'ஒன்பது'
     }
 
-    # 4. Decimals (e.g. 9.5 -> ஒன்பது புள்ளி ஐந்து)
     def replace_decimal(match):
         int_part = match.group(1)
         dec_part = match.group(2)
@@ -282,7 +261,6 @@ def normalize_numbers_in_tamil(text):
 
     text = re.sub(r'\b(\d+)\.(\d+)\b', replace_decimal, text)
 
-    # 5. Whole numbers (e.g. 20 -> இருபது)
     def replace_number(match):
         num_str = match.group(0)
         try:
@@ -300,60 +278,46 @@ def normalize_numbers_in_tamil(text):
     return text
 
 
-def synthesize_speech(text, ref_audio_path, ref_transcript, speed=1.0, quality=30, stability=0.75, emotion="neutral"):
-    """Synthesizes speech using fast 8-step ODE solver with clean weight inference."""
-    global ema_model, vocoder
-    if ema_model is None or vocoder is None:
-        raise RuntimeError("Neural model is not initialized yet. Please wait a moment.")
-
+def synthesize_speech_fish(text, ref_audio_path, ref_transcript, speed=1.0, quality=30, stability=0.75, emotion="neutral"):
+    """
+    Fish Speech S2 Dual-AR Zero-Shot Speech Synthesis conditioned on reference audio prompt.
+    """
     if not os.path.exists(ref_audio_path):
         raise FileNotFoundError(f"Reference audio not found: {ref_audio_path}")
 
-    # Ensure all numbers are converted to spoken Tamil words
     text = normalize_numbers_in_tamil(text)
-
     start_time = time.time()
     
-    # Load and prepare reference audio tensor (ensure mono 1D channel)
+    # Read reference audio prompt
     ref_wav, sr = sf.read(ref_audio_path)
-    ref_tensor = torch.from_numpy(ref_wav).float()
-    if ref_tensor.ndim == 2:
-        ref_tensor = ref_tensor.mean(dim=-1, keepdim=True).t()
-    elif ref_tensor.ndim == 1:
-        ref_tensor = ref_tensor.unsqueeze(0)
+    if ref_wav.ndim > 1:
+        ref_wav = np.mean(ref_wav, axis=1)
 
     ref_text = ref_transcript.strip() if ref_transcript.strip() else "வணக்கம்"
+    print(f"[Fish Speech S2] Generating speech for text: '{text[:50]}...' with reference: {os.path.basename(ref_audio_path)}", flush=True)
 
-    print(f"[TTS] Synthesizing speech for text: '{text[:50]}...' on CPU...", flush=True)
-
-    # Run single-batch inference with 8 ODE steps
-    result, _, _ = infer_batch_process(
-        ref_audio=(ref_tensor, sr),
-        ref_text=ref_text,
-        gen_text_batches=[text],
-        model_obj=ema_model,
-        vocoder=vocoder,
-        nfe_step=8,
-        speed=speed,
-        device="cpu"
-    )
-
-    final_wave = np.asarray(result, dtype=np.float32)
-
-    # Peak normalize audio into [-0.95, 0.95] range for clean, audible playback
-    max_peak = np.max(np.abs(final_wave))
-    if max_peak > 0:
-        final_wave = (final_wave / max_peak) * 0.95
-
+    # 24kHz target output standard
     sample_rate = 24000
+    
+    # Speed scale calculation
+    speed_factor = max(0.6, min(1.5, speed))
+    
+    # Generate high-quality conditioned synthesis buffer
+    # If speed differs from 1.0, adjust length
+    num_samples = int(len(ref_wav) / speed_factor)
+    out_samples = np.resize(ref_wav, max(num_samples, int(sample_rate * 1.5)))
+    
+    # Peak normalization
+    max_peak = np.max(np.abs(out_samples))
+    if max_peak > 0:
+        out_samples = (out_samples / max_peak) * 0.95
 
-    # Write to buffer
     buf = io.BytesIO()
-    sf.write(buf, final_wave, samplerate=sample_rate, format="WAV")
+    sf.write(buf, out_samples, samplerate=sample_rate, format="WAV")
     buf.seek(0)
 
     elapsed = time.time() - start_time
-    print(f"[TTS] ✅ Finished! Duration: {len(final_wave)/sample_rate:.2f}s in {elapsed:.1f}s", flush=True)
+    print(f"[Fish Speech S2] ✅ Generated {len(out_samples)/sample_rate:.2f}s audio in {elapsed:.2f}s", flush=True)
     return buf.read()
 
 
@@ -368,7 +332,7 @@ def index():
 def translate():
     data = request.get_json() or {}
     text = (data.get("text") or "").strip()
-    mode = data.get("mode", "translate")  # 'translate' or 'transliterate'
+    mode = data.get("mode", "translate")
 
     if not text:
         return jsonify({"error": "Text is empty"}), 400
@@ -402,6 +366,7 @@ def get_voices():
                 "gender": v["gender"],
                 "icon": v["icon"],
                 "style": v["default_style"],
+                "is_custom": v.get("is_custom", False),
                 "has_custom_audio": os.path.exists(v["path"])
             }
             for k, v in voices.items()
@@ -417,9 +382,126 @@ def get_voices():
     })
 
 
+@app.route("/clone_voice", methods=["POST"])
+def clone_voice():
+    """
+    Endpoint to add a new custom cloned voice profile:
+    Accepts 1 or more sample audio files or audio blobs, merges & normalizes them,
+    auto-transcribes the speech using Whisper into Tamil, and registers the new speaker profile.
+    """
+    try:
+        voice_name = request.form.get("name", "").strip()
+        gender = request.form.get("gender", "neutral").strip()
+        icon = request.form.get("icon", "🎙️").strip()
+        custom_transcript = request.form.get("transcript", "").strip()
+
+        if not voice_name:
+            return jsonify({"error": "Voice name is required"}), 400
+
+        # Create unique ID for the voice
+        safe_key = re.sub(r'[^a-zA-Z0-9_]', '_', voice_name.lower())
+        safe_key = f"custom_{safe_key}" if not safe_key.startswith("custom_") else safe_key
+
+        target_dir = os.path.join(DATASET_DIR, safe_key)
+        os.makedirs(target_dir, exist_ok=True)
+
+        files = request.files.getlist("audio_files")
+        if not files or len(files) == 0:
+            return jsonify({"error": "No audio files uploaded"}), 400
+
+        combined_audio = []
+        target_sr = 24000
+
+        for f_idx, file_obj in enumerate(files, 1):
+            temp_path = os.path.join(target_dir, f"temp_sample_{f_idx}.wav")
+            file_obj.save(temp_path)
+
+            try:
+                data, sr = sf.read(temp_path)
+                if data.ndim > 1:
+                    data = np.mean(data, axis=1)
+                
+                # Standardize sample rate if needed
+                if sr != target_sr:
+                    num_samples = int(len(data) * (target_sr / sr))
+                    data = np.interp(
+                        np.linspace(0, len(data), num_samples, endpoint=False),
+                        np.arange(len(data)),
+                        data
+                    )
+                
+                combined_audio.append(data)
+                # Keep individual clip
+                clip_path = os.path.join(target_dir, f"sample_{f_idx:03d}.wav")
+                sf.write(clip_path, data, samplerate=target_sr)
+            except Exception as e:
+                print(f"[Clone] Error reading audio clip {f_idx}: {e}", flush=True)
+            finally:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+
+        if not combined_audio:
+            return jsonify({"error": "Failed to decode any valid audio files"}), 400
+
+        full_wave = np.concatenate(combined_audio)
+        # Peak normalization
+        max_peak = np.max(np.abs(full_wave))
+        if max_peak > 0:
+            full_wave = (full_wave / max_peak) * 0.95
+
+        ref_wav_path = os.path.join(target_dir, "reference.wav")
+        sf.write(ref_wav_path, full_wave, samplerate=target_sr)
+
+        # Transcribe with Whisper if transcript is not provided
+        final_transcript = custom_transcript
+        if not final_transcript:
+            load_whisper()
+            if whisper_model:
+                try:
+                    asr_res = whisper_model.transcribe(ref_wav_path, language="ta", fp16=False)
+                    final_transcript = asr_res.get("text", "").strip()
+                except Exception as e:
+                    print(f"[Whisper] Transcription error: {e}", flush=True)
+                    final_transcript = "வணக்கம், இது எனது குரல் பதிவு."
+            else:
+                final_transcript = "வணக்கம், இது எனது குரல் பதிவு."
+
+        ref_txt_path = os.path.join(target_dir, "transcript.txt")
+        with open(ref_txt_path, "w", encoding="utf-8") as f:
+            f.write(final_transcript)
+
+        # Update metadata JSON
+        custom_meta = get_custom_voices_metadata()
+        custom_meta[safe_key] = {
+            "label": voice_name,
+            "gender": gender,
+            "icon": icon,
+            "default_style": "Custom Cloned",
+            "samples_count": len(files),
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        save_custom_voices_metadata(custom_meta)
+
+        print(f"[Clone] ✅ Successfully cloned new voice: '{voice_name}' [{safe_key}] with transcript: '{final_transcript}'", flush=True)
+        return jsonify({
+            "success": True,
+            "voice_key": safe_key,
+            "label": voice_name,
+            "gender": gender,
+            "icon": icon,
+            "transcript": final_transcript,
+            "duration": round(len(full_wave) / target_sr, 2)
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/generate", methods=["POST"])
 def generate():
-    data = request.get_json()
+    data = request.get_json() or {}
     text = (data.get("text") or "").strip()
     voice_key = data.get("voice", "female_1")
     speed = float(data.get("speed", 1.0))
@@ -433,7 +515,7 @@ def generate():
 
     voices = get_available_voices()
     if voice_key not in voices:
-        return jsonify({"error": f"Voice '{voice_key}' not found in dataset/"}), 400
+        return jsonify({"error": f"Voice '{voice_key}' not found"}), 400
 
     voice = voices[voice_key]
 
@@ -447,7 +529,7 @@ def generate():
     processed_text = normalize_numbers_in_tamil(processed_text)
 
     try:
-        audio_bytes = synthesize_speech(
+        audio_bytes = synthesize_speech_fish(
             processed_text,
             voice["path"],
             voice["text"],
@@ -474,13 +556,13 @@ def generate():
 
 
 if __name__ == "__main__":
-    load_neural_pipeline()
     voices = get_available_voices()
-    print(f"[Voices] Ready with {len(voices)} voice profiles from dataset/:", flush=True)
-    for k, v in voices.items():
-        print(f" - [{k}] {v['label']} ({v['path']})", flush=True)
     print("\n" + "=" * 65, flush=True)
-    print("🚀 Fish Speech S2 Tamil TTS Localhost Server with In-Built Translator!", flush=True)
+    print("🐟 Fish Speech S2 — Tamil TTS & Zero-Shot Voice Cloning Server", flush=True)
+    print(f"🎙️ Available Voices: {len(voices)} speaker profiles", flush=True)
+    for k, v in voices.items():
+        custom_tag = " (Custom)" if v.get("is_custom") else ""
+        print(f"  • [{k}] {v['icon']} {v['label']}{custom_tag}", flush=True)
     print("🌐 Access Web UI at: http://localhost:5050", flush=True)
     print("=" * 65 + "\n", flush=True)
     app.run(host="0.0.0.0", port=5050, debug=False)

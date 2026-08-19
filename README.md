@@ -1,4 +1,4 @@
-# 🎙️ Tamil TTS Model & Studio (Fish Speech S2 / IndicF5)
+# 🎙️ Tamil TTS Model & Studio (Fish Speech S2)
 
 A comprehensive Tamil Text-to-Speech (TTS) fine-tuning, voice cloning, and interactive studio framework supporting multiple voice profiles, Google Colab GPU training, local CPU fine-tuning, automated Whisper transcription, and real-time generation.
 
@@ -7,7 +7,7 @@ A comprehensive Tamil Text-to-Speech (TTS) fine-tuning, voice cloning, and inter
 ## 🌟 Features
 
 - **Multi-Speaker Dataset Pipeline**: Prepares audio, auto-trims silence, standardizes sampling rates, and auto-transcribes Tamil speech using OpenAI Whisper.
-- **Fish Speech S2 & IndicF5 Support**: Architecture optimized for natural Tamil phoneme representation and high-fidelity speech synthesis.
+- **Fish Speech S2 Architecture**: Dual-AR transformer optimized for natural Tamil phoneme representation and high-fidelity speech synthesis.
 - **Interactive Web UI**: Modern glassmorphic studio interface (`tts_ui.html`) with live playback, multi-speaker selection, speed/pitch controls, and audio export.
 - **FastAPI / Python Backend**: High-performance streaming backend (`tts_backend.py`) for inference and model checkpoints.
 - **Cloud & Local Training**:
