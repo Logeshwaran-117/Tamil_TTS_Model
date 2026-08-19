@@ -397,8 +397,8 @@ def synthesize_speech_fish(text, ref_audio_path, ref_transcript, speed=1.0, qual
     buf.seek(0)
 
     elapsed = time.time() - start_time
-    duration = len(final_wave) / target_sr
-    print(f"[Fish Speech S2] ✅ Generated {duration:.2f}s Tamil speech in {elapsed:.2f}s", flush=True)
+    duration = len(final_wave) / sample_rate
+    print(f"[Neural Engine] ✅ Generated {duration:.2f}s Tamil speech in {elapsed:.2f}s", flush=True)
     return buf.read()
 
 
@@ -634,10 +634,12 @@ def generate():
 
 
 if __name__ == "__main__":
-    load_neural_pipeline()
+    import threading
+    threading.Thread(target=load_neural_pipeline, daemon=True).start()
+
     voices = get_available_voices()
     print("\n" + "=" * 65, flush=True)
-    print("🐟 Fish Speech S2 — Tamil TTS & Zero-Shot Voice Cloning Server", flush=True)
+    print("🎙️ Neural Tamil TTS & Zero-Shot Voice Cloning Server", flush=True)
     print(f"🎙️ Available Voices: {len(voices)} speaker profiles", flush=True)
     for k, v in voices.items():
         custom_tag = " (Custom)" if v.get("is_custom") else ""
