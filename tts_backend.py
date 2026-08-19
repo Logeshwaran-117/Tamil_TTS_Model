@@ -1,14 +1,13 @@
 """
 Fish Speech S2 — Tamil TTS Backend with Real-Time Zero-Shot Voice Cloning & In-Built Translator
 Features:
- - 🐟 Fish Speech S2 Architecture
+ - 🐟 Fish Speech S2 Neural Transformer Engine (Dual-AR + DAC VQ-GAN)
  - 🎙️ Real-Time Zero-Shot Voice Cloning (/clone_voice)
  - 🗂️ Dynamic Multi-Speaker Profiles (Pre-set & User Custom Cloned Voices)
  - 🤖 Auto-Transcription with Whisper ASR
  - 🌐 In-Built English-to-Tamil Neural Translator (/translate)
  - 🔤 Phonetic Tanglish Transliteration
  - 🔢 Automatic Tamil Numeral & Currency Normalization
- - ⚡ Fast Inference on CPU
  - 🖥️ Interactive Web UI at http://localhost:5050
 """
 
@@ -58,12 +57,18 @@ torch.compile = lambda x, *args, **kwargs: x
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 
+from fish_speech.models.dac.inference import load_model as load_dac_model
+from fish_speech.models.text2semantic.inference import launch_thread_safe_queue
+from fish_speech.inference_engine import TTSInferenceEngine
+from fish_speech.utils.schema import ServeTTSRequest, ServeReferenceAudio
+
 app = Flask(__name__)
 CORS(app)
 
 DATASET_DIR = "dataset"
 CHECKPOINTS_DIR = "checkpoints"
 S2_PRO_DIR = os.path.join(CHECKPOINTS_DIR, "s2-pro")
+CODEC_PATH = os.path.join(S2_PRO_DIR, "codec.pth")
 CUSTOM_VOICES_FILE = os.path.join(DATASET_DIR, "custom_voices.json")
 WHISPER_CACHE_DIR = os.path.join(CACHE_ROOT, "whisper")
 
@@ -84,8 +89,48 @@ EMOTION_STYLES = {
     "surprised": {"label": "Excited & Surprised", "icon": "😲", "prompt_tag": "[excited]"},
 }
 
+tts_engine = None
 whisper_model = None
 device = "cpu"
+
+
+def init_tts_engine():
+    """Initializes Fish Speech S2 Dual-AR Transformer & DAC Neural Vocoder into memory."""
+    global tts_engine
+    if tts_engine is not None:
+        return tts_engine
+
+    print("\n=======================================================", flush=True)
+    print("  🐟 Initializing Fish Speech S2 Neural Model...", flush=True)
+    print("=======================================================", flush=True)
+
+    if not os.path.exists(S2_PRO_DIR) or not os.path.exists(CODEC_PATH):
+        raise RuntimeError(f"Fish Speech S2 weights missing in {S2_PRO_DIR}")
+
+    print(" -> Launching Dual-AR LLaMA Transformer queue...", flush=True)
+    llama_queue = launch_thread_safe_queue(
+        checkpoint_path=S2_PRO_DIR,
+        device=device,
+        precision=torch.float32,
+        compile=False
+    )
+
+    print(" -> Loading DAC Neural Vocoder...", flush=True)
+    dac_model = load_dac_model(
+        config_name="modded_dac_vq",
+        checkpoint_path=CODEC_PATH,
+        device=device
+    )
+
+    print(" -> Binding TTS Inference Engine...", flush=True)
+    tts_engine = TTSInferenceEngine(
+        llama_queue=llama_queue,
+        decoder_model=dac_model,
+        precision=torch.float32,
+        compile=False
+    )
+    print("✅ Fish Speech S2 Engine is 100% Ready!\n", flush=True)
+    return tts_engine
 
 
 def load_whisper():
@@ -280,43 +325,71 @@ def normalize_numbers_in_tamil(text):
 
 def synthesize_speech_fish(text, ref_audio_path, ref_transcript, speed=1.0, quality=30, stability=0.75, emotion="neutral"):
     """
-    Fish Speech S2 Dual-AR Zero-Shot Speech Synthesis conditioned on reference audio prompt.
+    Fish Speech S2 Dual-AR Zero-Shot Speech Synthesis:
+    Synthesizes the exact typed Tamil text conditioned on the reference speaker's voice prompt!
     """
+    engine = init_tts_engine()
+
     if not os.path.exists(ref_audio_path):
         raise FileNotFoundError(f"Reference audio not found: {ref_audio_path}")
 
     text = normalize_numbers_in_tamil(text)
     start_time = time.time()
     
-    # Read reference audio prompt
-    ref_wav, sr = sf.read(ref_audio_path)
-    if ref_wav.ndim > 1:
-        ref_wav = np.mean(ref_wav, axis=1)
+    with open(ref_audio_path, "rb") as f:
+        ref_audio_bytes = f.read()
 
     ref_text = ref_transcript.strip() if ref_transcript.strip() else "வணக்கம்"
-    print(f"[Fish Speech S2] Generating speech for text: '{text[:50]}...' with reference: {os.path.basename(ref_audio_path)}", flush=True)
+    print(f"[Fish Speech S2] Synthesizing speech for text: '{text[:60]}...' with voice: {os.path.basename(ref_audio_path)}", flush=True)
 
-    # 24kHz target output standard
-    sample_rate = 24000
-    
-    # Speed scale calculation
-    speed_factor = max(0.6, min(1.5, speed))
-    
-    # Generate high-quality conditioned synthesis buffer
-    num_samples = int(len(ref_wav) / speed_factor)
-    out_samples = np.resize(ref_wav, max(num_samples, int(sample_rate * 1.5)))
-    
+    # Temperature & top_p conditioned by stability
+    temperature = max(0.5, min(0.9, 1.0 - (stability * 0.4)))
+    top_p = max(0.6, min(0.95, 1.0 - (stability * 0.3)))
+
+    req = ServeTTSRequest(
+        text=text,
+        references=[
+            ServeReferenceAudio(
+                audio=ref_audio_bytes,
+                text=ref_text
+            )
+        ],
+        max_new_tokens=0,
+        chunk_length=512,
+        top_p=top_p,
+        repetition_penalty=1.2,
+        temperature=temperature,
+        streaming=False
+    )
+
+    final_audio = None
+    target_sr = 24000
+
+    for result in engine.inference(req):
+        if result.code == "final" and result.audio is not None:
+            target_sr, final_audio = result.audio
+            break
+        elif result.code == "error":
+            raise RuntimeError(f"Fish Speech synthesis error: {result.error}")
+
+    if final_audio is None:
+        raise RuntimeError("No audio was returned by Fish Speech S2 neural engine.")
+
+    final_wave = np.asarray(final_audio, dtype=np.float32)
+
     # Peak normalization
-    max_peak = np.max(np.abs(out_samples))
+    max_peak = np.max(np.abs(final_wave))
     if max_peak > 0:
-        out_samples = (out_samples / max_peak) * 0.95
+        final_wave = (final_wave / max_peak) * 0.95
 
+    # Write to in-memory WAV buffer
     buf = io.BytesIO()
-    sf.write(buf, out_samples, samplerate=sample_rate, format="WAV")
+    sf.write(buf, final_wave, samplerate=target_sr, format="WAV")
     buf.seek(0)
 
     elapsed = time.time() - start_time
-    print(f"[Fish Speech S2] ✅ Generated {len(out_samples)/sample_rate:.2f}s audio in {elapsed:.2f}s", flush=True)
+    duration = len(final_wave) / target_sr
+    print(f"[Fish Speech S2] ✅ Generated {duration:.2f}s Tamil speech in {elapsed:.2f}s", flush=True)
     return buf.read()
 
 
@@ -430,7 +503,6 @@ def clone_voice():
                     )
                 
                 combined_audio.append(data)
-                # Keep individual clip
                 clip_path = os.path.join(target_dir, f"sample_{f_idx:03d}.wav")
                 sf.write(clip_path, data, samplerate=target_sr)
             except Exception as e:
