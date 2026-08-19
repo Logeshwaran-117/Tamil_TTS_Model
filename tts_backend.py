@@ -303,7 +303,6 @@ def synthesize_speech_fish(text, ref_audio_path, ref_transcript, speed=1.0, qual
     speed_factor = max(0.6, min(1.5, speed))
     
     # Generate high-quality conditioned synthesis buffer
-    # If speed differs from 1.0, adjust length
     num_samples = int(len(ref_wav) / speed_factor)
     out_samples = np.resize(ref_wav, max(num_samples, int(sample_rate * 1.5)))
     
@@ -444,7 +443,6 @@ def clone_voice():
             return jsonify({"error": "Failed to decode any valid audio files"}), 400
 
         full_wave = np.concatenate(combined_audio)
-        # Peak normalization
         max_peak = np.max(np.abs(full_wave))
         if max_peak > 0:
             full_wave = (full_wave / max_peak) * 0.95
@@ -470,7 +468,6 @@ def clone_voice():
         with open(ref_txt_path, "w", encoding="utf-8") as f:
             f.write(final_transcript)
 
-        # Update metadata JSON
         custom_meta = get_custom_voices_metadata()
         custom_meta[safe_key] = {
             "label": voice_name,
