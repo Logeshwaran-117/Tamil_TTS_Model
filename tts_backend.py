@@ -217,18 +217,21 @@ def patch_llama_for_fish_qwen3_omni():
 
 
 model_load_lock = threading.Lock()
+model_load_lock = threading.Lock()
 model_is_loading = False
+model_load_error = None
 
 
 def load_fish_speech_s2_pipeline():
     """Load official Fish Speech S2 Dual-AR Transformer + DAC VQ-GAN vocoder."""
-    global fish_model, fish_decode_func, fish_codec, using_fish_s2, model_is_loading
+    global fish_model, fish_decode_func, fish_codec, using_fish_s2, model_is_loading, model_load_error
     with model_load_lock:
         if using_fish_s2 and fish_model is not None and fish_codec is not None:
             return True
         if model_is_loading:
             return False
         model_is_loading = True
+        model_load_error = None
         try:
             patch_llama_for_fish_qwen3_omni()
             from fish_speech.models.text2semantic.inference import init_model
@@ -274,6 +277,7 @@ def load_fish_speech_s2_pipeline():
             return True
         except Exception as e:
             model_is_loading = False
+            model_load_error = str(e)
             import traceback
             traceback.print_exc()
             print(f"[Fish S2] Error loading Fish Speech S2: {e}", flush=True)
@@ -539,13 +543,27 @@ def index():
 
 @app.route("/health", methods=["GET"])
 def health():
+    if using_fish_s2 and fish_model is not None:
+        status_str = "ready"
+        http_code = 200
+    elif model_is_loading:
+        status_str = "loading"
+        http_code = 202
+    elif model_load_error:
+        status_str = "error"
+        http_code = 500
+    else:
+        status_str = "idle"
+        http_code = 200
+
     return jsonify({
-        "status": "ready" if using_fish_s2 and fish_model is not None else ("loading" if model_is_loading else "idle"),
+        "status": status_str,
+        "error": model_load_error,
         "device": device,
         "cuda": torch.cuda.is_available(),
         "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "None",
         "voices_count": len(get_available_voices())
-    })
+    }), http_code
 
 
 @app.route("/openapi.json", methods=["GET"])
