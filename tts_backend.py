@@ -218,39 +218,51 @@ def patch_llama_for_fish_qwen3_omni():
         pass
 
 
+model_load_lock = threading.Lock()
+model_is_loading = False
+
+
 def load_fish_speech_s2_pipeline():
     """Load official Fish Speech S2 Dual-AR Transformer + DAC VQ-GAN vocoder."""
-    global fish_model, fish_decode_func, fish_codec, using_fish_s2
-    try:
-        patch_llama_for_fish_qwen3_omni()
-        from fish_speech.models.text2semantic.inference import init_model
-        print("\n=======================================================", flush=True)
-        print(f"  🐟 Initializing Official Fish Speech S2 Dual-AR Model ({device.upper()})...", flush=True)
-        print("=======================================================", flush=True)
+    global fish_model, fish_decode_func, fish_codec, using_fish_s2, model_is_loading
+    with model_load_lock:
+        if using_fish_s2 and fish_model is not None and fish_codec is not None:
+            return True
+        if model_is_loading:
+            return False
+        model_is_loading = True
+        try:
+            patch_llama_for_fish_qwen3_omni()
+            from fish_speech.models.text2semantic.inference import init_model
+            print("\n=======================================================", flush=True)
+            print(f"  🐟 Initializing Official Fish Speech S2 Dual-AR Model ({device.upper()})...", flush=True)
+            print("=======================================================", flush=True)
 
-        if not os.path.exists(os.path.join(S2_PRO_DIR, "codec.pth")):
-            from huggingface_hub import snapshot_download
-            print("[Fish S2] Downloading s2-pro weights from Hugging Face...", flush=True)
-            snapshot_download(repo_id="fishaudio/s2-pro", local_dir=S2_PRO_DIR, local_dir_use_symlinks=False)
+            if not os.path.exists(os.path.join(S2_PRO_DIR, "codec.pth")):
+                from huggingface_hub import snapshot_download
+                print("[Fish S2] Downloading s2-pro weights from Hugging Face...", flush=True)
+                snapshot_download(repo_id="fishaudio/s2-pro", local_dir=S2_PRO_DIR, local_dir_use_symlinks=False)
 
-        precision = torch.bfloat16 if device == "cuda" else torch.float32
-        fish_model, fish_decode_func = init_model(S2_PRO_DIR, device=device, precision=precision, compile=False)
-        with torch.device(device):
-            fish_model.setup_caches(
-                max_batch_size=1,
-                max_seq_len=fish_model.config.max_seq_len,
-                dtype=next(fish_model.parameters()).dtype
-            )
-        codec_ckpt = os.path.join(S2_PRO_DIR, "codec.pth")
-        fish_codec = load_codec_model_robust(codec_ckpt, device=device, precision=precision)
-        using_fish_s2 = True
-        print(f"[Fish S2] ✅ Official Fish Speech S2 Dual-AR Engine is 100% Ready on {device}!\n", flush=True)
-        return True
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"[Fish S2] Error loading Fish Speech S2: {e}", flush=True)
-        return False
+            precision = torch.bfloat16 if device == "cuda" else torch.float32
+            fish_model, fish_decode_func = init_model(S2_PRO_DIR, device=device, precision=precision, compile=False)
+            with torch.device(device):
+                fish_model.setup_caches(
+                    max_batch_size=1,
+                    max_seq_len=fish_model.config.max_seq_len,
+                    dtype=next(fish_model.parameters()).dtype
+                )
+            codec_ckpt = os.path.join(S2_PRO_DIR, "codec.pth")
+            fish_codec = load_codec_model_robust(codec_ckpt, device=device, precision=precision)
+            using_fish_s2 = True
+            model_is_loading = False
+            print(f"[Fish S2] ✅ Official Fish Speech S2 Dual-AR Engine is 100% Ready on {device}!\n", flush=True)
+            return True
+        except Exception as e:
+            model_is_loading = False
+            import traceback
+            traceback.print_exc()
+            print(f"[Fish S2] Error loading Fish Speech S2: {e}", flush=True)
+            return False
 
 
 def load_whisper():
@@ -1155,8 +1167,7 @@ def fine_tune():
 
 
 if __name__ == "__main__":
-    import threading
-    threading.Thread(target=load_fish_speech_s2_pipeline, daemon=True).start()
+    load_fish_speech_s2_pipeline()
 
     voices = get_available_voices()
     print("\n" + "=" * 65, flush=True)
