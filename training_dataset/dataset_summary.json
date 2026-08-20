@@ -1,6 +1,6 @@
 {
-  "total_samples": 470,
-  "total_duration_seconds": 2951.82,
+  "total_samples": 471,
+  "total_duration_seconds": 2971.82,
   "speakers": {
     "male_1": {
       "count": 100,
@@ -30,6 +30,11 @@
     "female_3_own": {
       "count": 100,
       "total_duration": 661.07,
+      "gender": "female"
+    },
+    "custom_kavi": {
+      "count": 1,
+      "total_duration": 20.0,
       "gender": "female"
     }
   }

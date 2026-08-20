@@ -92,7 +92,7 @@ EMOTION_STYLES = {
 ema_model = None
 vocoder = None
 whisper_model = None
-device = "cpu"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def find_snapshot(pattern_list):
@@ -107,7 +107,7 @@ def load_neural_pipeline():
     """Load neural TTS foundation model synchronously from local cache with exact weight mapping."""
     global ema_model, vocoder
     print("\n=======================================================", flush=True)
-    print("  Initializing Neural Tamil Speech Model into Memory...", flush=True)
+    print(f"  Initializing Neural Tamil Speech Model into Memory ({device.upper()})...", flush=True)
     print("=======================================================", flush=True)
 
     indic_snap = find_snapshot([
@@ -116,7 +116,9 @@ def load_neural_pipeline():
         os.path.expanduser("~/.cache/huggingface/hub/models--ai4bharat--IndicF5/snapshots/*")
     ])
     if not indic_snap:
-        raise RuntimeError("IndicF5 snapshot not found in cache")
+        from huggingface_hub import snapshot_download
+        print("[Model] Downloading IndicF5 snapshot from Hugging Face...", flush=True)
+        indic_snap = snapshot_download(repo_id="ai4bharat/IndicF5")
 
     vocab_path = os.path.join(indic_snap, "checkpoints", "vocab.txt")
     if not os.path.exists(vocab_path):
@@ -129,7 +131,9 @@ def load_neural_pipeline():
         os.path.expanduser("~/.cache/huggingface/hub/models--charactr--vocos-mel-24khz/snapshots/*")
     ])
     if not vocos_snap:
-        raise RuntimeError("Vocos snapshot not found in cache")
+        from huggingface_hub import snapshot_download
+        print("[Model] Downloading Vocos snapshot from Hugging Face...", flush=True)
+        vocos_snap = snapshot_download(repo_id="charactr/vocos-mel-24khz")
 
     vocos_config = os.path.join(vocos_snap, "config.yaml")
 
@@ -372,8 +376,9 @@ def synthesize_speech_fish(text, ref_audio_path, ref_transcript, speed=1.0, qual
     elif ref_tensor.ndim == 1:
         ref_tensor = ref_tensor.unsqueeze(0)
 
-    ref_text = ref_transcript.strip() if ref_transcript.strip() else "வணக்கம்"
-    print(f"[Speech Engine] Synthesizing speech for text: '{text[:50]}...' with voice: {os.path.basename(ref_audio_path)}", flush=True)
+    ref_text = (ref_transcript.strip() if ref_transcript.strip() else "வணக்கம்") + " "
+    nfe = max(12, min(int(quality), 32)) if quality else 16
+    print(f"[Speech Engine] Synthesizing speech (nfe={nfe}) for text: '{text[:50]}...' with voice: {os.path.basename(ref_audio_path)}", flush=True)
 
     result, _, _ = infer_batch_process(
         ref_audio=(ref_tensor, sr),
@@ -381,9 +386,9 @@ def synthesize_speech_fish(text, ref_audio_path, ref_transcript, speed=1.0, qual
         gen_text_batches=[text],
         model_obj=ema_model,
         vocoder=vocoder,
-        nfe_step=8,
+        nfe_step=nfe,
         speed=speed,
-        device="cpu"
+        device=device
     )
 
     final_wave = np.asarray(result, dtype=np.float32)
@@ -407,6 +412,292 @@ def index():
     with open("tts_ui.html", "r", encoding="utf-8") as f:
         content = f.read()
     return Response(content, mimetype="text/html")
+
+
+@app.route("/openapi.json", methods=["GET"])
+def openapi_spec():
+    spec = {
+        "openapi": "3.0.3",
+        "info": {
+            "title": "🎙️ Tamil Neural TTS & Voice Cloning API",
+            "version": "2.0.0",
+            "description": "High-performance Tamil Text-to-Speech API with real-time zero-shot voice cloning, dynamic multi-speaker profiles, English-to-Tamil neural translation, and phonetic transliteration."
+        },
+        "servers": [
+            {"url": "http://localhost:5050", "description": "Local Development Server"}
+        ],
+        "tags": [
+            {"name": "Speech Synthesis", "description": "Generate Tamil speech audio from text"},
+            {"name": "Voice Management", "description": "Fetch available voices and clone custom voices"},
+            {"name": "Translation", "description": "Translate English or Tanglish text to Tamil"}
+        ],
+        "paths": {
+            "/voices": {
+                "get": {
+                    "tags": ["Voice Management"],
+                    "summary": "Get all available voice profiles & emotions",
+                    "description": "Returns preset speaker profiles, custom cloned voices, and available emotion styles.",
+                    "responses": {
+                        "200": {
+                            "description": "List of voices and emotions",
+                            "content": {
+                                "application/json": {
+                                    "example": {
+                                        "voices": [
+                                            {"key": "female_1", "label": "Female 1 (Narrator)", "gender": "female", "icon": "👩", "style": "Narrator", "is_custom": False},
+                                            {"key": "male_1", "label": "Male 1 (Narrator)", "gender": "male", "icon": "🧔", "style": "Narrator", "is_custom": False}
+                                        ],
+                                        "emotions": [
+                                            {"key": "neutral", "label": "Neutral / Normal", "icon": "😐"},
+                                            {"key": "cheerful", "label": "Happy & Cheerful", "icon": "😊"},
+                                            {"key": "narrator", "label": "Storyteller / Drama", "icon": "📖"},
+                                            {"key": "formal", "label": "Formal / News", "icon": "👔"},
+                                            {"key": "surprised", "label": "Excited & Surprised", "icon": "😲"}
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "/generate": {
+                "post": {
+                    "tags": ["Speech Synthesis"],
+                    "summary": "Generate Tamil speech from text",
+                    "description": "Synthesizes natural Tamil speech using Fish Speech S2 / F5-TTS with custom voice and emotion parameters.",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["text"],
+                                    "properties": {
+                                        "text": {
+                                            "type": "string",
+                                            "example": "வணக்கம்! நீங்கள் எப்படி இருக்கிறீர்கள்?",
+                                            "description": "Tamil text, Tanglish, or English to synthesize"
+                                        },
+                                        "voice": {
+                                            "type": "string",
+                                            "default": "female_1",
+                                            "example": "female_1",
+                                            "description": "Speaker key (e.g. female_1, male_1, or custom cloned key)"
+                                        },
+                                        "emotion": {
+                                            "type": "string",
+                                            "default": "neutral",
+                                            "enum": ["neutral", "cheerful", "narrator", "formal", "surprised"],
+                                            "description": "Voice emotion style"
+                                        },
+                                        "speed": {
+                                            "type": "number",
+                                            "default": 1.0,
+                                            "minimum": 0.5,
+                                            "maximum": 2.0,
+                                            "description": "Speech speed multiplier"
+                                        },
+                                        "quality": {
+                                            "type": "integer",
+                                            "default": 30,
+                                            "minimum": 16,
+                                            "maximum": 64,
+                                            "description": "Inference quality (NFE steps)"
+                                        },
+                                        "stability": {
+                                            "type": "number",
+                                            "default": 0.75,
+                                            "minimum": 0.1,
+                                            "maximum": 1.0,
+                                            "description": "Voice stability factor"
+                                        },
+                                        "auto_translate": {
+                                            "type": "boolean",
+                                            "default": True,
+                                            "description": "Automatically translate English words into Tamil"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "Speech successfully generated",
+                            "content": {
+                                "application/json": {
+                                    "example": {
+                                        "audio_b64": "UklGRuQEAABXQVZFZm10IBAAAAABAAEA...",
+                                        "voice": "female_1",
+                                        "voice_label": "Female 1 (Narrator)",
+                                        "speed": 1.0,
+                                        "quality": 30,
+                                        "stability": 0.75,
+                                        "emotion": "neutral",
+                                        "transliterated_text": "வணக்கம்! நீங்கள் எப்படி இருக்கிறீர்கள்?"
+                                    }
+                                }
+                            }
+                        },
+                        "400": {"description": "Invalid input text or parameters"},
+                        "500": {"description": "Server synthesis error"}
+                    }
+                }
+            },
+            "/clone_voice": {
+                "post": {
+                    "tags": ["Voice Management"],
+                    "summary": "Clone a new voice profile (Zero-Shot)",
+                    "description": "Upload reference audio clips of a speaker to register an instant zero-shot cloned voice profile.",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "multipart/form-data": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["name", "audio_files"],
+                                    "properties": {
+                                        "name": {
+                                            "type": "string",
+                                            "example": "MyCustomVoice",
+                                            "description": "Unique display name for the cloned voice"
+                                        },
+                                        "gender": {
+                                            "type": "string",
+                                            "enum": ["male", "female", "neutral"],
+                                            "default": "neutral",
+                                            "description": "Speaker gender"
+                                        },
+                                        "icon": {
+                                            "type": "string",
+                                            "default": "🎙️",
+                                            "description": "Emoji icon for the profile"
+                                        },
+                                        "transcript": {
+                                            "type": "string",
+                                            "description": "Tamil transcript of reference audio (optional, auto-transcribed via Whisper if empty)"
+                                        },
+                                        "audio_files": {
+                                            "type": "array",
+                                            "items": {"type": "string", "format": "binary"},
+                                            "description": "One or more audio files (.wav or .mp3, 3-10 sec)"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "Voice cloned successfully",
+                            "content": {
+                                "application/json": {
+                                    "example": {
+                                        "success": True,
+                                        "voice_key": "custom_mycustomvoice",
+                                        "label": "MyCustomVoice",
+                                        "gender": "male",
+                                        "icon": "🎙️",
+                                        "samples_count": 1,
+                                        "primary_transcript": "வணக்கம்"
+                                    }
+                                }
+                            }
+                        },
+                        "400": {"description": "Missing name or audio files"}
+                    }
+                }
+            },
+            "/translate": {
+                "post": {
+                    "tags": ["Translation"],
+                    "summary": "Translate English or Tanglish to Tamil",
+                    "description": "Converts English text or Tanglish phonetic spelling into clean Tamil script.",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["text"],
+                                    "properties": {
+                                        "text": {
+                                            "type": "string",
+                                            "example": "vanakkam nanba eppadi irukinga",
+                                            "description": "English sentence or Tanglish text"
+                                        },
+                                        "mode": {
+                                            "type": "string",
+                                            "enum": ["translate", "transliterate"],
+                                            "default": "translate",
+                                            "description": "Neural translation ('translate') or phonetic transliteration ('transliterate')"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "Translation successful",
+                            "content": {
+                                "application/json": {
+                                    "example": {
+                                        "original": "vanakkam nanba eppadi irukinga",
+                                        "translated": "வணக்கம் நண்பா எப்படி இருக்கீங்க",
+                                        "mode": "transliterate",
+                                        "source_detected": "en"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return jsonify(spec)
+
+
+@app.route("/docs", methods=["GET"])
+@app.route("/swagger", methods=["GET"])
+def swagger_ui():
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tamil TTS API — Swagger UI</title>
+  <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  <link rel="icon" type="image/png" href="https://unpkg.com/swagger-ui-dist@5/favicon-32x32.png" />
+  <style>
+    html { box-sizing: border-box; overflow: -moz-scrollbars-vertical; overflow-y: scroll; }
+    *, *:before, *:after { box-sizing: inherit; }
+    body { margin: 0; background: #fafafa; font-family: sans-serif; }
+    .topbar { display: none !important; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" charset="UTF-8"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js" charset="UTF-8"></script>
+  <script>
+    window.onload = function() {
+      window.ui = SwaggerUIBundle({
+        url: "/openapi.json",
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIStandalonePreset
+        ],
+        layout: "BaseLayout"
+      });
+    };
+  </script>
+</body>
+</html>"""
+    return Response(html, mimetype="text/html")
 
 
 @app.route("/translate", methods=["POST"])
@@ -463,12 +754,110 @@ def get_voices():
     })
 
 
+def sync_voice_to_training_dataset(safe_key, sample_refs, gender):
+    """
+    Syncs new voice reference WAVs and transcripts into training_dataset/wavs,
+    updates metadata.csv, train.txt, val.txt, and dataset_summary.json.
+    """
+    try:
+        train_dir = "training_dataset"
+        wavs_dir = os.path.join(train_dir, "wavs")
+        os.makedirs(wavs_dir, exist_ok=True)
+
+        meta_csv_path = os.path.join(train_dir, "metadata.csv")
+        existing_rows = []
+        existing_files = set()
+
+        if os.path.exists(meta_csv_path):
+            with open(meta_csv_path, "r", encoding="utf-8") as f:
+                _ = f.readline()  # skip header
+                for line in f:
+                    parts = line.strip().split("|")
+                    if len(parts) >= 5:
+                        try:
+                            dur = float(parts[4])
+                        except Exception:
+                            dur = 0.0
+                        existing_rows.append({
+                            "audio_file": parts[0],
+                            "transcript": parts[1],
+                            "speaker_id": parts[2],
+                            "gender": parts[3],
+                            "duration": dur
+                        })
+                        existing_files.add(parts[0])
+
+        for idx, ref in enumerate(sample_refs, 1):
+            train_wav_name = f"{safe_key}_{idx:04d}.wav"
+            train_wav_path = os.path.join(wavs_dir, train_wav_name)
+            shutil.copyfile(ref["wav"], train_wav_path)
+
+            row = {
+                "audio_file": train_wav_name,
+                "transcript": ref["txt"],
+                "speaker_id": safe_key,
+                "gender": gender,
+                "duration": ref["duration"]
+            }
+            if train_wav_name in existing_files:
+                for r in existing_rows:
+                    if r["audio_file"] == train_wav_name:
+                        r.update(row)
+            else:
+                existing_rows.append(row)
+                existing_files.add(train_wav_name)
+
+        # Write updated metadata.csv
+        with open(meta_csv_path, "w", encoding="utf-8") as f:
+            f.write("audio_file|transcript|speaker_id|gender|duration\n")
+            for r in existing_rows:
+                f.write(f"{r['audio_file']}|{r['transcript']}|{r['speaker_id']}|{r['gender']}|{r['duration']}\n")
+
+        # Write train.txt & val.txt
+        import random
+        random.seed(42)
+        shuffled = list(existing_rows)
+        random.shuffle(shuffled)
+        split_idx = max(int(len(shuffled) * 0.85), 1)
+        train_set = shuffled[:split_idx]
+        val_set = shuffled[split_idx:]
+
+        with open(os.path.join(train_dir, "train.txt"), "w", encoding="utf-8") as f:
+            for m in train_set:
+                f.write(f"wavs/{m['audio_file']}|{m['transcript']}|{m['speaker_id']}\n")
+
+        with open(os.path.join(train_dir, "val.txt"), "w", encoding="utf-8") as f:
+            for m in val_set:
+                f.write(f"wavs/{m['audio_file']}|{m['transcript']}|{m['speaker_id']}\n")
+
+        # Update dataset_summary.json
+        summary = {
+            "total_samples": len(existing_rows),
+            "total_duration_seconds": round(sum(m["duration"] for m in existing_rows), 2),
+            "speakers": {}
+        }
+        for m in existing_rows:
+            spk = m["speaker_id"]
+            if spk not in summary["speakers"]:
+                summary["speakers"][spk] = {"count": 0, "total_duration": 0.0, "gender": m["gender"]}
+            summary["speakers"][spk]["count"] += 1
+            summary["speakers"][spk]["total_duration"] = round(summary["speakers"][spk]["total_duration"] + m["duration"], 2)
+
+        with open(os.path.join(train_dir, "dataset_summary.json"), "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2)
+
+        print(f"[Training Dataset] ✅ Synced '{safe_key}' ({len(sample_refs)} clips) to training_dataset/ (Total: {len(existing_rows)} samples)", flush=True)
+    except Exception as e:
+        print(f"[Training Dataset] Warning syncing to training dataset: {e}", flush=True)
+
+
 @app.route("/clone_voice", methods=["POST"])
 def clone_voice():
     """
     Endpoint to add a new custom cloned voice profile:
     Accepts 1 or more sample audio files or audio blobs, merges & normalizes them,
-    auto-transcribes the speech using Whisper into Tamil, and registers the new speaker profile.
+    respects manual user transcript if provided (or auto-transcribes via Whisper if empty),
+    registers the new speaker profile, and syncs to training_dataset/.
     """
     try:
         voice_name = request.form.get("name", "").strip()
@@ -490,8 +879,8 @@ def clone_voice():
         if not files or len(files) == 0:
             return jsonify({"error": "No audio files uploaded"}), 400
 
-        load_whisper()
         sample_refs = []
+        target_sr = 24000
 
         for f_idx, file_obj in enumerate(files, 1):
             temp_path = os.path.join(target_dir, f"temp_sample_{f_idx}.wav")
@@ -522,17 +911,24 @@ def clone_voice():
                 ref_txt_path = os.path.join(target_dir, ref_txt_name)
                 sf.write(ref_wav_path, data, samplerate=target_sr)
 
-                # Transcribe this specific sample clip with Whisper
+                # Priority: 1. Manual user transcript, 2. Whisper auto-transcription, 3. Default fallback
                 clip_transcript = ""
-                if whisper_model:
-                    try:
-                        asr_res = whisper_model.transcribe(ref_wav_path, language="ta", fp16=False)
-                        clip_transcript = asr_res.get("text", "").strip()
-                    except Exception as e:
-                        print(f"[Whisper] Sample {f_idx} transcription error: {e}", flush=True)
+                if custom_transcript:
+                    # User manually provided transcript - DO NOT overwrite with Whisper!
+                    clip_transcript = custom_transcript
+                    print(f"[Clone] Using manual user transcript for clip {f_idx:03d}: '{clip_transcript}'", flush=True)
+                else:
+                    load_whisper()
+                    if whisper_model:
+                        try:
+                            asr_res = whisper_model.transcribe(ref_wav_path, language="ta", fp16=False)
+                            clip_transcript = asr_res.get("text", "").strip()
+                            print(f"[Whisper] Auto-transcribed clip {f_idx:03d}: '{clip_transcript}'", flush=True)
+                        except Exception as e:
+                            print(f"[Whisper] Sample {f_idx} transcription error: {e}", flush=True)
 
                 if not clip_transcript:
-                    clip_transcript = custom_transcript if custom_transcript else "வணக்கம்"
+                    clip_transcript = "வணக்கம்"
 
                 with open(ref_txt_path, "w", encoding="utf-8") as f:
                     f.write(clip_transcript)
@@ -568,6 +964,9 @@ def clone_voice():
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
         }
         save_custom_voices_metadata(custom_meta)
+
+        # Sync cloned voice clips directly into training_dataset/
+        sync_voice_to_training_dataset(safe_key, sample_refs, gender)
 
         print(f"[Clone] ✅ Successfully cloned '{voice_name}' with {len(sample_refs)} distinct reference samples and transcripts!", flush=True)
         return jsonify({
@@ -653,6 +1052,8 @@ if __name__ == "__main__":
     for k, v in voices.items():
         custom_tag = " (Custom)" if v.get("is_custom") else ""
         print(f"  • [{k}] {v['icon']} {v['label']}{custom_tag}", flush=True)
-    print("🌐 Access Web UI at: http://localhost:5050", flush=True)
+    print("🌐 Access Web UI at:       http://localhost:5050", flush=True)
+    print("📖 Swagger API Docs at:    http://localhost:5050/docs", flush=True)
+    print("📋 OpenAPI Spec JSON at:   http://localhost:5050/openapi.json", flush=True)
     print("=" * 65 + "\n", flush=True)
     app.run(host="0.0.0.0", port=5050, debug=False)
