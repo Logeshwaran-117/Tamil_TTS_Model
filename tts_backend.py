@@ -222,6 +222,73 @@ model_is_loading = False
 model_load_error = None
 
 
+def load_fish_model_direct_gpu(checkpoint_dir, device="cuda", precision=torch.bfloat16):
+    """
+    Directly streams model weights onto GPU VRAM in bfloat16 shard by shard.
+    Uses ~4.5 GB GPU VRAM and avoids high System RAM exhaustion.
+    """
+    from pathlib import Path
+    from safetensors.torch import load_file as st_load_file
+    from fish_speech.tokenizer import FishTokenizer
+    import fish_speech.models.text2semantic.llama as llama_mod
+    from fish_speech.models.text2semantic.inference import decode_one_token_ar
+
+    config = llama_mod.BaseModelArgs.from_pretrained(str(checkpoint_dir))
+    config.max_seq_len = 2048
+
+    tokenizer = FishTokenizer.from_pretrained(checkpoint_dir)
+    config.semantic_begin_id = tokenizer.semantic_begin_id
+    config.semantic_end_id = tokenizer.semantic_end_id
+
+    print(f"[Fish S2] Allocating DualARTransformer directly on {device.upper()} ({precision})...", flush=True)
+    with torch.device(device):
+        model = llama_mod.DualARTransformer(config).to(device=device, dtype=precision)
+
+    path_obj = Path(checkpoint_dir)
+    index_json = path_obj / "model.safetensors.index.json"
+    single_st = path_obj / "model.safetensors"
+    pth_file = path_obj / "model.pth"
+
+    if index_json.exists():
+        with open(index_json) as f:
+            st_index = json.load(f)
+        shard_files = sorted(set(st_index["weight_map"].values()))
+        for shard in shard_files:
+            print(f"  📥 Loading shard {shard} directly into GPU VRAM...", flush=True)
+            shard_weights = st_load_file(str(path_obj / shard), device=device)
+            shard_weights = {k: v.to(dtype=precision, device=device) for k, v in shard_weights.items()}
+            if hasattr(llama_mod, "_remap_fish_qwen3_omni_keys"):
+                shard_weights = llama_mod._remap_fish_qwen3_omni_keys(shard_weights)
+            model.load_state_dict(shard_weights, strict=False, assign=True)
+            del shard_weights
+            if device == "cuda":
+                torch.cuda.empty_cache()
+    elif single_st.exists():
+        print(f"  📥 Loading single safetensors directly into GPU VRAM...", flush=True)
+        weights = st_load_file(str(single_st), device=device)
+        weights = {k: v.to(dtype=precision, device=device) for k, v in weights.items()}
+        if hasattr(llama_mod, "_remap_fish_qwen3_omni_keys"):
+            weights = llama_mod._remap_fish_qwen3_omni_keys(weights)
+        model.load_state_dict(weights, strict=False, assign=True)
+        del weights
+        if device == "cuda":
+            torch.cuda.empty_cache()
+    elif pth_file.exists():
+        weights = torch.load(pth_file, map_location=device, weights_only=True)
+        if "state_dict" in weights:
+            weights = weights["state_dict"]
+        model.load_state_dict(weights, strict=False, assign=True)
+        del weights
+
+    model.tokenizer = tokenizer
+    model.fixed_temperature = torch.tensor(0.7, device=device, dtype=torch.float)
+    model.fixed_top_p = torch.tensor(0.7, device=device, dtype=torch.float)
+    model.fixed_repetition_penalty = torch.tensor(1.5, device=device, dtype=torch.float)
+    model.eval()
+
+    return model, decode_one_token_ar
+
+
 def load_fish_speech_s2_pipeline():
     """Load official Fish Speech S2 Dual-AR Transformer + DAC VQ-GAN vocoder."""
     global fish_model, fish_decode_func, fish_codec, using_fish_s2, model_is_loading, model_load_error
@@ -234,7 +301,6 @@ def load_fish_speech_s2_pipeline():
         model_load_error = None
         try:
             patch_llama_for_fish_qwen3_omni()
-            from fish_speech.models.text2semantic.inference import init_model
             print("\n=======================================================", flush=True)
             print(f"  🐟 Initializing Official Fish Speech S2 Dual-AR Model ({device.upper()})...", flush=True)
             print("=======================================================", flush=True)
@@ -262,7 +328,13 @@ def load_fish_speech_s2_pipeline():
                             shutil.copyfileobj(resp, out_file)
 
             precision = torch.bfloat16 if device == "cuda" else torch.float32
-            fish_model, fish_decode_func = init_model(S2_PRO_DIR, device=device, precision=precision, compile=False)
+            try:
+                fish_model, fish_decode_func = load_fish_model_direct_gpu(S2_PRO_DIR, device=device, precision=precision)
+            except Exception as direct_err:
+                print(f"[Fish S2] Direct GPU loader fallback: {direct_err}", flush=True)
+                from fish_speech.models.text2semantic.inference import init_model
+                fish_model, fish_decode_func = init_model(S2_PRO_DIR, device=device, precision=precision, compile=False)
+
             with torch.device(device):
                 fish_model.setup_caches(
                     max_batch_size=1,
