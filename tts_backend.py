@@ -1041,6 +1041,23 @@ def generate():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/fine_tune", methods=["POST"])
+def fine_tune():
+    """Runs Fish Speech S2 multi-speaker fine-tuning & adaptation on dataset/training_dataset."""
+    try:
+        import subprocess
+        proc = subprocess.run([sys.executable, "train_local_cpu.py"], capture_output=True, text=True)
+        return jsonify({
+            "status": "success" if proc.returncode == 0 else "failed",
+            "returncode": proc.returncode,
+            "output": proc.stdout[-1500:] if proc.stdout else "",
+            "error": proc.stderr[-500:] if proc.stderr else "",
+            "message": "Fine-tuning completed successfully!" if proc.returncode == 0 else "Fine-tuning encountered an error."
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     import threading
     threading.Thread(target=load_neural_pipeline, daemon=True).start()

@@ -688,6 +688,11 @@
             ➕ Clone New Voice
           </button>
 
+          <!-- Fine-Tune Dataset Trigger Button -->
+          <button class="btn-clone-trigger" id="btnFineTuneDataset" style="background: linear-gradient(135deg, #059669 0%, #10b981 100%);">
+            🧠 Fine-Tune Dataset
+          </button>
+
           <!-- Voice Dropdown Popover Menu -->
           <div class="dropdown-menu" id="voiceMenu">
             <div class="dropdown-title">
@@ -1224,6 +1229,34 @@
         clearInterval(timerInterval);
         generateBtn.disabled = false;
         generateBtn.innerHTML = "<span>↑ Generate Speech</span>";
+      }
+    });
+
+    // Fine-tune dataset button handler
+    const btnFineTuneDataset = document.getElementById("btnFineTuneDataset");
+    btnFineTuneDataset.addEventListener("click", async () => {
+      if (!confirm("Start multi-speaker fine-tuning on training dataset? This will adapt the neural acoustic profiles for all dataset speakers.")) return;
+      
+      statusEl.textContent = "🧠 Running multi-speaker fine-tuning & adaptation on dataset...";
+      statusEl.className = "loading";
+      btnFineTuneDataset.disabled = true;
+      btnFineTuneDataset.textContent = "⏳ Fine-Tuning...";
+
+      try {
+        const res = await fetch(`${API_BASE}/fine_tune`, { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Fine-tuning failed");
+        
+        statusEl.textContent = "✅ " + data.message;
+        statusEl.className = "success";
+        await loadVoices();
+        alert("🎉 Fine-Tuning Completed Successfully!\nAll speaker profiles have been updated.");
+      } catch (err) {
+        statusEl.textContent = `❌ Fine-Tuning Error: ${err.message}`;
+        statusEl.className = "error";
+      } finally {
+        btnFineTuneDataset.disabled = false;
+        btnFineTuneDataset.textContent = "🧠 Fine-Tune Dataset";
       }
     });
 
