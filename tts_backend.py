@@ -94,6 +94,12 @@ vocoder = None
 whisper_model = None
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+# Official Fish Speech S2 State
+fish_model = None
+fish_decode_func = None
+fish_codec = None
+using_fish_s2 = False
+
 
 def find_snapshot(pattern_list):
     for pat in pattern_list:
@@ -101,6 +107,39 @@ def find_snapshot(pattern_list):
         if dirs:
             return dirs[0]
     return None
+
+
+def load_fish_speech_s2_pipeline():
+    """Load official Fish Speech S2 Dual-AR Transformer + DAC VQ-GAN vocoder."""
+    global fish_model, fish_decode_func, fish_codec, using_fish_s2
+    try:
+        from fish_speech.models.text2semantic.inference import init_model, load_codec_model
+        print("\n=======================================================", flush=True)
+        print(f"  🐟 Initializing Official Fish Speech S2 Dual-AR Model ({device.upper()})...", flush=True)
+        print("=======================================================", flush=True)
+
+        if not os.path.exists(os.path.join(S2_PRO_DIR, "codec.pth")):
+            from huggingface_hub import snapshot_download
+            print("[Fish S2] Downloading s2-pro weights from Hugging Face...", flush=True)
+            snapshot_download(repo_id="fishaudio/s2-pro", local_dir=S2_PRO_DIR, local_dir_use_symlinks=False)
+
+        precision = torch.bfloat16 if device == "cuda" else torch.float32
+        fish_model, fish_decode_func = init_model(S2_PRO_DIR, device=device, precision=precision, compile=False)
+        with torch.device(device):
+            fish_model.setup_caches(
+                max_batch_size=1,
+                max_seq_len=fish_model.config.max_seq_len,
+                dtype=next(fish_model.parameters()).dtype
+            )
+        codec_ckpt = os.path.join(S2_PRO_DIR, "codec.pth")
+        fish_codec = load_codec_model(codec_ckpt, device=device, precision=precision)
+        using_fish_s2 = True
+        print(f"[Fish S2] ✅ Official Fish Speech S2 Dual-AR Engine is 100% Ready on {device}!\n", flush=True)
+        return True
+    except Exception as e:
+        print(f"[Fish S2] Notice: Fish Speech S2 direct load failed ({e}). Falling back to IndicF5 neural pipeline.", flush=True)
+        load_neural_pipeline()
+        return False
 
 
 def load_neural_pipeline():
@@ -354,12 +393,11 @@ def normalize_numbers_in_tamil(text):
 
 def synthesize_speech_fish(text, ref_audio_path, ref_transcript, speed=1.0, quality=30, stability=0.75, emotion="neutral"):
     """
-    Fast Neural Speech Synthesis conditioned on reference speaker audio prompt.
-    Synthesizes the exact typed Tamil text conditioned on any speaker profile (including custom cloned voices).
+    Synthesizes speech using official Fish Speech S2 Dual-AR Transformer or fallback neural engine.
     """
-    global ema_model, vocoder
-    if ema_model is None or vocoder is None:
-        load_neural_pipeline()
+    global fish_model, fish_codec, fish_decode_func, using_fish_s2, ema_model, vocoder
+    if not using_fish_s2 and (ema_model is None or vocoder is None):
+        load_fish_speech_s2_pipeline()
 
     if not os.path.exists(ref_audio_path):
         raise FileNotFoundError(f"Reference audio not found: {ref_audio_path}")
@@ -367,8 +405,55 @@ def synthesize_speech_fish(text, ref_audio_path, ref_transcript, speed=1.0, qual
     # Ensure all numbers are converted to spoken Tamil words
     text = normalize_numbers_in_tamil(text)
     start_time = time.time()
-    
-    # Load and prepare reference audio tensor (ensure mono 1D channel)
+
+    # 1. Official Fish Speech S2 Dual-AR Engine
+    if using_fish_s2 and fish_model is not None and fish_codec is not None:
+        try:
+            from fish_speech.models.text2semantic.inference import encode_audio, generate_long, decode_to_audio
+            print(f"[Fish Speech S2] Dual-AR Synthesis for: '{text[:50]}...' with voice: {os.path.basename(ref_audio_path)}", flush=True)
+            
+            prompt_tokens = [encode_audio(ref_audio_path, fish_codec, device).cpu()]
+            prompt_text = [ref_transcript.strip() if ref_transcript.strip() else "வணக்கம்"]
+            
+            temperature = max(0.2, min(float(stability), 1.2))
+            generator = generate_long(
+                model=fish_model,
+                device=device,
+                decode_one_token=fish_decode_func,
+                text=text,
+                temperature=temperature,
+                top_p=0.85,
+                top_k=30,
+                compile=False,
+                prompt_text=prompt_text,
+                prompt_tokens=prompt_tokens
+            )
+            
+            codes = []
+            for response in generator:
+                if response.action == "sample":
+                    codes.append(response.codes)
+                elif response.action == "next" and codes:
+                    merged_codes = torch.cat(codes, dim=1)
+                    audio_tensor = decode_to_audio(merged_codes.to(device), fish_codec)
+                    final_wave = audio_tensor.cpu().float().numpy()
+                    max_peak = np.max(np.abs(final_wave))
+                    if max_peak > 0:
+                        final_wave = (final_wave / max_peak) * 0.95
+                    
+                    buf = io.BytesIO()
+                    sf.write(buf, final_wave, samplerate=fish_codec.sample_rate, format="WAV")
+                    buf.seek(0)
+                    elapsed = time.time() - start_time
+                    duration = len(final_wave) / fish_codec.sample_rate
+                    print(f"[Fish Speech S2] ✅ Generated {duration:.2f}s Tamil speech in {elapsed:.2f}s", flush=True)
+                    return buf.read()
+        except Exception as e:
+            print(f"[Fish S2 Error] {e}. Falling back to IndicF5 engine...", flush=True)
+            if ema_model is None or vocoder is None:
+                load_neural_pipeline()
+
+    # 2. Fallback Neural Engine (IndicF5)
     ref_wav, sr = sf.read(ref_audio_path)
     ref_tensor = torch.from_numpy(ref_wav).float()
     if ref_tensor.ndim == 2:
@@ -1060,7 +1145,7 @@ def fine_tune():
 
 if __name__ == "__main__":
     import threading
-    threading.Thread(target=load_neural_pipeline, daemon=True).start()
+    threading.Thread(target=load_fish_speech_s2_pipeline, daemon=True).start()
 
     voices = get_available_voices()
     print("\n" + "=" * 65, flush=True)
