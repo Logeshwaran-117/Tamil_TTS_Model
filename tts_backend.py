@@ -249,7 +249,7 @@ def load_fish_speech_s2_pipeline():
             with torch.device(device):
                 fish_model.setup_caches(
                     max_batch_size=1,
-                    max_seq_len=fish_model.config.max_seq_len,
+                    max_seq_len=min(fish_model.config.max_seq_len, 2048),
                     dtype=next(fish_model.parameters()).dtype
                 )
             codec_ckpt = os.path.join(S2_PRO_DIR, "codec.pth")
