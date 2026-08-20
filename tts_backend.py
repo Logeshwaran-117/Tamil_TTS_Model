@@ -523,6 +523,17 @@ def index():
     return Response(content, mimetype="text/html")
 
 
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({
+        "status": "ready" if using_fish_s2 and fish_model is not None else ("loading" if model_is_loading else "idle"),
+        "device": device,
+        "cuda": torch.cuda.is_available(),
+        "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "None",
+        "voices_count": len(get_available_voices())
+    })
+
+
 @app.route("/openapi.json", methods=["GET"])
 def openapi_spec():
     spec = {
