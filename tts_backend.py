@@ -1,7 +1,7 @@
 """
-Fish Speech S2 — Tamil TTS Backend with Real-Time Zero-Shot Voice Cloning & In-Built Translator
+Indic F5 — Tamil Neural TTS Backend with Real-Time Zero-Shot Voice Cloning & In-Built Translator
 Features:
- - 🐟 Fish Speech S2 Neural Transformer Engine (Dual-AR + DAC VQ-GAN)
+ - 🎙️ Indic F5 Neural Flow-Matching Transformer Engine (F5-TTS DiT + Vocos 24kHz)
  - 🎙️ Real-Time Zero-Shot Voice Cloning (/clone_voice)
  - 🗂️ Dynamic Multi-Speaker Profiles (Pre-set & User Custom Cloned Voices)
  - 🤖 Auto-Transcription with Whisper ASR
@@ -24,7 +24,6 @@ CACHE_ROOT = os.path.abspath("cache")
 os.environ["PIP_CACHE_DIR"] = os.path.join(CACHE_ROOT, "pip")
 os.environ["TORCH_HOME"] = os.path.join(CACHE_ROOT, "torch")
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 import io
 import re
@@ -55,16 +54,24 @@ torch.compile = lambda x, *args, **kwargs: x
 
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
+from safetensors.torch import load_file
+from vocos import Vocos
+from f5_tts.model import DiT
+from f5_tts.infer.utils_infer import load_model as load_f5_model, infer_batch_process
 
 app = Flask(__name__)
 CORS(app)
 
 DATASET_DIR = "dataset"
 CHECKPOINTS_DIR = "checkpoints"
-S2_PRO_DIR = os.path.join(CHECKPOINTS_DIR, "s2-pro")
-CODEC_PATH = os.path.join(S2_PRO_DIR, "codec.pth")
+INDIC_F5_DIR = os.path.join(CHECKPOINTS_DIR, "indic_f5")
+VOCOS_DIR = os.path.join(CHECKPOINTS_DIR, "vocos")
 CUSTOM_VOICES_FILE = os.path.join(DATASET_DIR, "custom_voices.json")
 WHISPER_CACHE_DIR = os.path.join(CACHE_ROOT, "whisper")
+
+os.makedirs(CHECKPOINTS_DIR, exist_ok=True)
+os.makedirs(INDIC_F5_DIR, exist_ok=True)
+os.makedirs(VOCOS_DIR, exist_ok=True)
 
 DEFAULT_VOICE_METADATA = {
     "female_1": {"label": "Female 1 (Narrator)", "gender": "female", "icon": "👩", "default_style": "Narrator"},
@@ -83,295 +90,131 @@ EMOTION_STYLES = {
     "surprised": {"label": "Excited & Surprised", "icon": "😲", "prompt_tag": "[excited]"},
 }
 
+ema_model = None
+vocoder = None
 whisper_model = None
 device = "cuda" if torch.cuda.is_available() else "cpu"
-
-# Official Fish Speech S2 State
-fish_model = None
-fish_decode_func = None
-fish_codec = None
-using_fish_s2 = False
-
-
-def load_codec_model_robust(codec_checkpoint_path, device, precision=torch.bfloat16):
-    """Load the DAC codec model for audio encoding/decoding robustly across any fish-speech version."""
-    try:
-        from fish_speech.models.text2semantic.inference import load_codec_model
-        return load_codec_model(codec_checkpoint_path, device, precision)
-    except Exception:
-        pass
-
-    try:
-        from fish_speech.models.dac.inference import load_model as load_dac_model
-        return load_dac_model("modded_dac_vq", codec_checkpoint_path, device=device)
-    except Exception:
-        pass
-
-    import fish_speech
-    from hydra.utils import instantiate
-    from omegaconf import OmegaConf
-    config_path = os.path.join(fish_speech.__path__[0], "configs", "modded_dac_vq.yaml")
-    cfg = OmegaConf.load(config_path)
-    codec = instantiate(cfg)
-    state_dict = torch.load(codec_checkpoint_path, map_location="cpu")
-    if "state_dict" in state_dict:
-        state_dict = state_dict["state_dict"]
-    if any("generator" in k for k in state_dict):
-        state_dict = {k.replace("generator.", ""): v for k, v in state_dict.items() if "generator." in k}
-    codec.load_state_dict(state_dict, strict=False)
-    codec.eval()
-    codec.to(device=device, dtype=precision)
-    return codec
-
-
-def encode_audio_robust(audio_path, codec, device):
-    """Encode audio into VQ prompt tokens."""
-    try:
-        from fish_speech.models.text2semantic.inference import encode_audio
-        return encode_audio(audio_path, codec, device)
-    except Exception:
-        pass
-
-    wav, sr = torchaudio.load(str(audio_path))
-    if wav.shape[0] > 1:
-        wav = wav.mean(dim=0, keepdim=True)
-    wav = torchaudio.functional.resample(wav.to(device), sr, codec.sample_rate)[0]
-    model_dtype = next(codec.parameters()).dtype
-    audios = wav[None, None].to(dtype=model_dtype)
-    audio_lengths = torch.tensor([len(wav)], device=device, dtype=torch.long)
-    indices, feature_lengths = codec.encode(audios, audio_lengths)
-    return indices[0, :, : feature_lengths[0]]
-
-
-def decode_to_audio_robust(codes, codec):
-    """Decode VQ tokens to audio waveform."""
-    try:
-        from fish_speech.models.text2semantic.inference import decode_to_audio
-        return decode_to_audio(codes, codec)
-    except Exception:
-        pass
-    audio = codec.from_indices(codes[None])
-    return audio[0, 0]
-
-
-def patch_llama_for_fish_qwen3_omni():
-    """Patches older fish-speech llama module to support fish_qwen3_omni architecture."""
-    try:
-        import dataclasses
-        from pathlib import Path
-        import fish_speech.models.text2semantic.llama as llama_mod
-        orig_from_pretrained = llama_mod.BaseModelArgs.from_pretrained
-
-        def patched_from_pretrained(path):
-            p = Path(path)
-            if p.is_dir():
-                p = p / "config.json"
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if data.get("model_type") == "fish_qwen3_omni" and not hasattr(llama_mod.BaseModelArgs, "_from_fish_qwen3_omni"):
-                tc = data.get("text_config", {})
-                adc = data.get("audio_decoder_config", {})
-                flat = dict(
-                    model_type="dual_ar",
-                    vocab_size=tc.get("vocab_size", 32000),
-                    n_layer=tc.get("n_layer", 32),
-                    n_head=tc.get("n_head", 32),
-                    n_local_heads=tc.get("n_local_heads", -1),
-                    head_dim=tc.get("head_dim"),
-                    dim=tc.get("dim", 2560),
-                    intermediate_size=tc.get("intermediate_size"),
-                    rope_base=tc.get("rope_base", 10000),
-                    norm_eps=tc.get("norm_eps", 1e-5),
-                    max_seq_len=tc.get("max_seq_len", 2048),
-                    dropout=tc.get("dropout", 0.0),
-                    tie_word_embeddings=tc.get("tie_word_embeddings", True),
-                    attention_qkv_bias=tc.get("attention_qkv_bias", False),
-                    attention_o_bias=tc.get("attention_o_bias", False),
-                    attention_qk_norm=tc.get("attention_qk_norm", False),
-                    use_gradient_checkpointing=tc.get("use_gradient_checkpointing", True),
-                    initializer_range=tc.get("initializer_range", 0.02),
-                    semantic_begin_id=data.get("semantic_start_token_id", 0),
-                    semantic_end_id=data.get("semantic_end_token_id", 0),
-                    scale_codebook_embeddings=True,
-                    norm_fastlayer_input=True,
-                    audio_embed_dim=adc.get("text_dim", tc.get("dim", 2560)),
-                    codebook_size=adc.get("vocab_size", 4096),
-                    num_codebooks=adc.get("num_codebooks", 10),
-                    n_fast_layer=adc.get("n_layer", 4),
-                    fast_dim=adc.get("dim"),
-                    fast_n_head=adc.get("n_head"),
-                    fast_n_local_heads=adc.get("n_local_heads"),
-                    fast_head_dim=adc.get("head_dim"),
-                    fast_intermediate_size=adc.get("intermediate_size"),
-                    fast_attention_qkv_bias=adc.get("attention_qkv_bias"),
-                    fast_attention_qk_norm=adc.get("attention_qk_norm"),
-                    fast_attention_o_bias=adc.get("attention_o_bias"),
-                )
-                valid_keys = {f.name for f in dataclasses.fields(llama_mod.DualARModelArgs)}
-                flat = {k: v for k, v in flat.items() if k in valid_keys}
-                return llama_mod.DualARModelArgs(**flat)
-            return orig_from_pretrained(path)
-
-        llama_mod.BaseModelArgs.from_pretrained = staticmethod(patched_from_pretrained)
-    except Exception:
-        pass
-
-
-model_load_lock = threading.Lock()
 model_load_lock = threading.Lock()
 model_is_loading = False
 model_load_error = None
 
 
-def load_fish_model_direct_gpu(checkpoint_dir, device="cuda", precision=torch.bfloat16):
-    """
-    Directly streams model weights onto GPU VRAM in bfloat16 in-place.
-    Uses only ~4.8 GB GPU VRAM and ~5 GB System RAM (zero duplicate GPU buffers).
-    """
-    import gc
-    from pathlib import Path
-    from safetensors.torch import load_file as st_load_file
-    from fish_speech.tokenizer import FishTokenizer
-    import fish_speech.models.text2semantic.llama as llama_mod
-    from fish_speech.models.text2semantic.inference import decode_one_token_ar
-
-    config = llama_mod.BaseModelArgs.from_pretrained(str(checkpoint_dir))
-    config.max_seq_len = 2048
-
-    tokenizer = FishTokenizer.from_pretrained(checkpoint_dir)
-    config.semantic_begin_id = tokenizer.semantic_begin_id
-    config.semantic_end_id = tokenizer.semantic_end_id
-
-    if device == "cuda":
-        torch.cuda.empty_cache()
-    gc.collect()
-
-    print(f"[Fish S2] Allocating DualARTransformer in {device.upper()} VRAM ({precision})...", flush=True)
-    with torch.device(device):
-        model = llama_mod.DualARTransformer(config).to(device=device, dtype=precision)
-
-    path_obj = Path(checkpoint_dir)
-    index_json = path_obj / "model.safetensors.index.json"
-    single_st = path_obj / "model.safetensors"
-    pth_file = path_obj / "model.pth"
-
-    model_state = model.state_dict()
-
-    if index_json.exists():
-        with open(index_json) as f:
-            st_index = json.load(f)
-        shard_files = sorted(set(st_index["weight_map"].values()))
-        for shard in shard_files:
-            print(f"  📥 Streaming shard {shard} into GPU VRAM in-place...", flush=True)
-            shard_weights = st_load_file(str(path_obj / shard), device="cpu")
-            if hasattr(llama_mod, "_remap_fish_qwen3_omni_keys"):
-                shard_weights = llama_mod._remap_fish_qwen3_omni_keys(shard_weights)
-            
-            with torch.no_grad():
-                for k, v in shard_weights.items():
-                    if k in model_state:
-                        model_state[k].copy_(v.to(device=device, dtype=precision, non_blocking=True))
-            del shard_weights
-            gc.collect()
-            if device == "cuda":
-                torch.cuda.empty_cache()
-    elif single_st.exists():
-        print(f"  📥 Streaming single safetensors into GPU VRAM in-place...", flush=True)
-        weights = st_load_file(str(single_st), device="cpu")
-        if hasattr(llama_mod, "_remap_fish_qwen3_omni_keys"):
-            weights = llama_mod._remap_fish_qwen3_omni_keys(weights)
-        with torch.no_grad():
-            for k, v in weights.items():
-                if k in model_state:
-                    model_state[k].copy_(v.to(device=device, dtype=precision, non_blocking=True))
-        del weights
-        gc.collect()
-        if device == "cuda":
-            torch.cuda.empty_cache()
-    elif pth_file.exists():
-        weights = torch.load(pth_file, map_location="cpu", weights_only=True)
-        if "state_dict" in weights:
-            weights = weights["state_dict"]
-        with torch.no_grad():
-            for k, v in weights.items():
-                if k in model_state:
-                    model_state[k].copy_(v.to(device=device, dtype=precision, non_blocking=True))
-        del weights
-
-    model.tokenizer = tokenizer
-    model.fixed_temperature = torch.tensor(0.7, device=device, dtype=torch.float)
-    model.fixed_top_p = torch.tensor(0.7, device=device, dtype=torch.float)
-    model.fixed_repetition_penalty = torch.tensor(1.5, device=device, dtype=torch.float)
-    model.eval()
-
-    print(f"[Fish S2] ✅ Model parameters loaded into GPU VRAM!", flush=True)
-    return model, decode_one_token_ar
+def find_snapshot(pattern_list):
+    for pat in pattern_list:
+        dirs = glob.glob(pat)
+        if dirs:
+            return dirs[0]
+    return None
 
 
-def load_fish_speech_s2_pipeline():
-    """Load official Fish Speech S2 Dual-AR Transformer + DAC VQ-GAN vocoder."""
-    global fish_model, fish_decode_func, fish_codec, using_fish_s2, model_is_loading, model_load_error
+def download_vocos_if_needed():
+    """Ensure Vocos 24kHz neural vocoder is downloaded locally."""
+    config_path = os.path.join(VOCOS_DIR, "config.yaml")
+    model_path = os.path.join(VOCOS_DIR, "pytorch_model.bin")
+    
+    if not os.path.exists(config_path) or not os.path.exists(model_path):
+        print("[Vocos] Downloading 24kHz neural vocoder...", flush=True)
+        files = [
+            ("https://huggingface.co/charactr/vocos-mel-24khz/resolve/main/config.yaml", config_path),
+            ("https://huggingface.co/charactr/vocos-mel-24khz/resolve/main/pytorch_model.bin", model_path)
+        ]
+        for url, dest in files:
+            if not os.path.exists(dest) or os.path.getsize(dest) < 100:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req) as resp, open(dest, "wb") as f:
+                    shutil.copyfileobj(resp, f)
+        print("[Vocos] ✅ Vocos vocoder ready!", flush=True)
+
+
+def download_indic_f5_if_needed():
+    """Ensure Indic F5 model and vocab are downloaded locally."""
+    model_path = os.path.join(INDIC_F5_DIR, "model.safetensors")
+    vocab_path = os.path.join(INDIC_F5_DIR, "vocab.txt")
+
+    if os.path.exists(model_path) and os.path.exists(vocab_path):
+        return model_path, vocab_path
+
+    # Check HF Cache
+    indic_snap = find_snapshot([
+        "cache/huggingface/hub/models--ai4bharat--IndicF5/snapshots/*",
+        "cache/**/models--ai4bharat--IndicF5/snapshots/*",
+        os.path.expanduser("~/.cache/huggingface/hub/models--ai4bharat--IndicF5/snapshots/*")
+    ])
+    if indic_snap and os.path.exists(os.path.join(indic_snap, "model.safetensors")):
+        return os.path.join(indic_snap, "model.safetensors"), os.path.join(indic_snap, "checkpoints", "vocab.txt")
+
+    token = os.environ.get("HF_TOKEN") or None
+    from huggingface_hub import snapshot_download
+    print("\n[Indic F5] Downloading IndicF5 Tamil Model from Hugging Face (~1.2 GB)...", flush=True)
+    snap = snapshot_download(repo_id="ai4bharat/IndicF5", token=token)
+    
+    # Copy to checkpoints/indic_f5 for permanent local offline access
+    src_model = os.path.join(snap, "model.safetensors")
+    src_vocab = os.path.join(snap, "checkpoints", "vocab.txt")
+    if os.path.exists(src_model):
+        shutil.copy(src_model, model_path)
+    if os.path.exists(src_vocab):
+        shutil.copy(src_vocab, vocab_path)
+
+    return model_path, vocab_path
+
+
+def load_indic_f5_pipeline():
+    """Load Indic F5 (DiT + Vocos) model into memory."""
+    global ema_model, vocoder, model_is_loading, model_load_error
     with model_load_lock:
-        if using_fish_s2 and fish_model is not None and fish_codec is not None:
+        if ema_model is not None and vocoder is not None:
             return True
         if model_is_loading:
             return False
         model_is_loading = True
         model_load_error = None
         try:
-            patch_llama_for_fish_qwen3_omni()
             print("\n=======================================================", flush=True)
-            print(f"  🐟 Initializing Official Fish Speech S2 Dual-AR Model ({device.upper()})...", flush=True)
+            print(f"  🇮🇳 Initializing Indic F5 Tamil Neural TTS ({device.upper()})...", flush=True)
             print("=======================================================", flush=True)
 
-            if not os.path.exists(os.path.join(S2_PRO_DIR, "codec.pth")):
-                print("[Fish S2] Downloading s2-pro weights directly...", flush=True)
-                os.makedirs(S2_PRO_DIR, exist_ok=True)
-                base_url = "https://huggingface.co/fishaudio/s2-pro/resolve/main"
-                model_files = [
-                    "config.json",
-                    "model.safetensors.index.json",
-                    "model-00001-of-00002.safetensors",
-                    "model-00002-of-00002.safetensors",
-                    "codec.pth",
-                    "tokenizer.json",
-                    "tokenizer_config.json",
-                    "special_tokens_map.json"
-                ]
-                for mf in model_files:
-                    dest = os.path.join(S2_PRO_DIR, mf)
-                    if not os.path.exists(dest):
-                        print(f"  📥 Fetching {mf}...", flush=True)
-                        req = urllib.request.Request(f"{base_url}/{mf}", headers={"User-Agent": "Mozilla/5.0"})
-                        with urllib.request.urlopen(req) as resp, open(dest, "wb") as out_file:
-                            shutil.copyfileobj(resp, out_file)
+            download_vocos_if_needed()
+            safetensors_path, vocab_path = download_indic_f5_if_needed()
 
-            precision = torch.bfloat16 if device == "cuda" else torch.float32
-            try:
-                fish_model, fish_decode_func = load_fish_model_direct_gpu(S2_PRO_DIR, device=device, precision=precision)
-            except Exception as direct_err:
-                print(f"[Fish S2] Direct GPU loader fallback: {direct_err}", flush=True)
-                from fish_speech.models.text2semantic.inference import init_model
-                fish_model, fish_decode_func = init_model(S2_PRO_DIR, device=device, precision=precision, compile=False)
+            vocos_config = os.path.join(VOCOS_DIR, "config.yaml")
+            vocos_bin = os.path.join(VOCOS_DIR, "pytorch_model.bin")
 
-            with torch.device(device):
-                fish_model.setup_caches(
-                    max_batch_size=1,
-                    max_seq_len=min(fish_model.config.max_seq_len, 2048),
-                    dtype=next(fish_model.parameters()).dtype
-                )
-            codec_ckpt = os.path.join(S2_PRO_DIR, "codec.pth")
-            fish_codec = load_codec_model_robust(codec_ckpt, device=device, precision=precision)
-            using_fish_s2 = True
+            print(f"[Indic F5] Loading DiT Transformer ({device})...", flush=True)
+            ema_model = load_f5_model(
+                DiT,
+                dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4),
+                mel_spec_type="vocos",
+                vocab_file=vocab_path,
+                device=device
+            )
+
+            print(f"[Indic F5] Loading Vocos Neural Vocoder ({device})...", flush=True)
+            vocoder = Vocos.from_hparams(vocos_config)
+            vocos_state = torch.load(vocos_bin, map_location=device, weights_only=True)
+            vocoder.load_state_dict(vocos_state)
+            vocoder.eval()
+
+            print(f"[Indic F5] Loading model weights from {os.path.basename(safetensors_path)}...", flush=True)
+            state_dict = load_file(safetensors_path, device=device)
+            ema_state = {k.replace("ema_model._orig_mod.", ""): v for k, v in state_dict.items() if k.startswith("ema_model.")}
+            vocoder_state = {k.replace("vocoder._orig_mod.", ""): v for k, v in state_dict.items() if k.startswith("vocoder.")}
+
+            ema_model.load_state_dict(ema_state, strict=True)
+            if vocoder_state:
+                vocoder.load_state_dict(vocoder_state, strict=False)
+
+            ema_model.eval()
+            vocoder.eval()
             model_is_loading = False
-            print(f"[Fish S2] ✅ Official Fish Speech S2 Dual-AR Engine is 100% Ready on {device}!\n", flush=True)
+            print(f"[Indic F5] ✅ Indic F5 Tamil Speech Model is 100% Ready on {device}!\n", flush=True)
             return True
         except Exception as e:
             model_is_loading = False
             model_load_error = str(e)
             import traceback
             traceback.print_exc()
-            print(f"[Fish S2] Error loading Fish Speech S2: {e}", flush=True)
+            print(f"[Indic F5] Error loading Indic F5: {e}", flush=True)
             return False
 
 
@@ -380,7 +223,6 @@ def load_whisper():
     global whisper_model
     if whisper_model is None:
         try:
-            # pyrefly: ignore [missing-import]
             import whisper
             print("[Whisper] Loading Whisper ASR model for Tamil speech transcription...", flush=True)
             whisper_model = whisper.load_model("small", download_root=WHISPER_CACHE_DIR, device=device)
@@ -566,63 +408,57 @@ def normalize_numbers_in_tamil(text):
     return text
 
 
-def synthesize_speech_fish(text, ref_audio_path, ref_transcript, speed=1.0, quality=30, stability=0.75, emotion="neutral"):
+def synthesize_speech_indic(text, ref_audio_path, ref_transcript, speed=1.0, quality=30, stability=0.75, emotion="neutral"):
     """
-    Synthesizes speech using official Fish Speech S2 Dual-AR Transformer + DAC VQ-GAN vocoder.
+    Synthesizes Tamil speech using Indic F5 Neural Flow-Matching Transformer + Vocos 24kHz.
     """
-    global fish_model, fish_codec, fish_decode_func, using_fish_s2
-    if not using_fish_s2 or fish_model is None or fish_codec is None:
-        load_fish_speech_s2_pipeline()
+    global ema_model, vocoder
+    if ema_model is None or vocoder is None:
+        load_indic_f5_pipeline()
 
     if not os.path.exists(ref_audio_path):
         raise FileNotFoundError(f"Reference audio not found: {ref_audio_path}")
 
-    # Ensure all numbers are converted to spoken Tamil words
+    # Convert numerals to spoken Tamil
     text = normalize_numbers_in_tamil(text)
     start_time = time.time()
 
-    # pyrefly: ignore [missing-import]
-    from fish_speech.models.text2semantic.inference import generate_long
-    print(f"[Fish Speech S2] Dual-AR Synthesis for: '{text[:50]}...' with voice: {os.path.basename(ref_audio_path)}", flush=True)
-    
-    prompt_tokens = [encode_audio_robust(ref_audio_path, fish_codec, device).cpu()]
-    prompt_text = [ref_transcript.strip() if ref_transcript.strip() else "வணக்கம்"]
-    
-    temperature = max(0.2, min(float(stability), 1.2))
-    generator = generate_long(
-        model=fish_model,
-        device=device,
-        decode_one_token=fish_decode_func,
-        text=text,
-        temperature=temperature,
-        top_p=0.85,
-        top_k=30,
-        compile=False,
-        prompt_text=prompt_text,
-        prompt_tokens=prompt_tokens
+    # Load reference audio
+    ref_wav, sr = sf.read(ref_audio_path)
+    ref_tensor = torch.from_numpy(ref_wav).float()
+    if ref_tensor.ndim == 2:
+        ref_tensor = ref_tensor.mean(dim=-1, keepdim=True).t()
+    elif ref_tensor.ndim == 1:
+        ref_tensor = ref_tensor.unsqueeze(0)
+
+    ref_text = (ref_transcript.strip() if ref_transcript.strip() else "வணக்கம்") + " "
+    nfe = max(12, min(int(quality), 32)) if quality else 16
+    print(f"[Indic F5] Synthesizing speech (nfe={nfe}) for: '{text[:50]}...' with voice: {os.path.basename(ref_audio_path)}", flush=True)
+
+    result, _, _ = infer_batch_process(
+        ref_audio=(ref_tensor, sr),
+        ref_text=ref_text,
+        gen_text_batches=[text],
+        model_obj=ema_model,
+        vocoder=vocoder,
+        nfe_step=nfe,
+        speed=speed,
+        device=device
     )
-    
-    codes = []
-    for response in generator:
-        if response.action == "sample":
-            codes.append(response.codes)
-        elif response.action == "next" and codes:
-            merged_codes = torch.cat(codes, dim=1)
-            audio_tensor = decode_to_audio_robust(merged_codes.to(device), fish_codec)
-            final_wave = audio_tensor.cpu().float().numpy()
-            max_peak = np.max(np.abs(final_wave))
-            if max_peak > 0:
-                final_wave = (final_wave / max_peak) * 0.95
-            
-            buf = io.BytesIO()
-            sf.write(buf, final_wave, samplerate=fish_codec.sample_rate, format="WAV")
-            buf.seek(0)
-            elapsed = time.time() - start_time
-            duration = len(final_wave) / fish_codec.sample_rate
-            print(f"[Fish Speech S2] ✅ Generated {duration:.2f}s Tamil speech in {elapsed:.2f}s", flush=True)
-            return buf.read()
-    
-    raise RuntimeError("Fish Speech S2 did not generate audio output.")
+
+    final_wave = np.asarray(result, dtype=np.float32)
+    max_peak = np.max(np.abs(final_wave))
+    if max_peak > 0:
+        final_wave = (final_wave / max_peak) * 0.95
+
+    sample_rate = 24000
+    buf = io.BytesIO()
+    sf.write(buf, final_wave, samplerate=sample_rate, format="WAV")
+    buf.seek(0)
+    elapsed = time.time() - start_time
+    duration = len(final_wave) / sample_rate
+    print(f"[Indic F5] ✅ Generated {duration:.2f}s Tamil speech in {elapsed:.2f}s", flush=True)
+    return buf.read()
 
 
 @app.route("/", methods=["GET"])
@@ -634,7 +470,7 @@ def index():
 
 @app.route("/health", methods=["GET"])
 def health():
-    if using_fish_s2 and fish_model is not None:
+    if ema_model is not None and vocoder is not None:
         status_str = "ready"
         http_code = 200
     elif model_is_loading:
@@ -649,6 +485,7 @@ def health():
 
     return jsonify({
         "status": status_str,
+        "model": "Indic F5 (F5-TTS DiT + Vocos 24kHz)",
         "error": model_load_error,
         "device": device,
         "cuda": torch.cuda.is_available(),
@@ -662,240 +499,36 @@ def openapi_spec():
     spec = {
         "openapi": "3.0.3",
         "info": {
-            "title": "🎙️ Tamil Neural TTS & Voice Cloning API",
+            "title": "🎙️ Tamil Indic F5 Neural TTS & Voice Cloning API",
             "version": "2.0.0",
-            "description": "High-performance Tamil Text-to-Speech API with real-time zero-shot voice cloning, dynamic multi-speaker profiles, English-to-Tamil neural translation, and phonetic transliteration."
+            "description": "High-performance Tamil Text-to-Speech API powered by Indic F5-TTS DiT and Vocos 24kHz with real-time zero-shot voice cloning, dynamic multi-speaker profiles, and English-to-Tamil translator."
         },
         "servers": [
             {"url": "http://localhost:5050", "description": "Local Development Server"}
         ],
-        "tags": [
-            {"name": "Speech Synthesis", "description": "Generate Tamil speech audio from text"},
-            {"name": "Voice Management", "description": "Fetch available voices and clone custom voices"},
-            {"name": "Translation", "description": "Translate English or Tanglish text to Tamil"}
-        ],
         "paths": {
             "/voices": {
                 "get": {
-                    "tags": ["Voice Management"],
                     "summary": "Get all available voice profiles & emotions",
-                    "description": "Returns preset speaker profiles, custom cloned voices, and available emotion styles.",
-                    "responses": {
-                        "200": {
-                            "description": "List of voices and emotions",
-                            "content": {
-                                "application/json": {
-                                    "example": {
-                                        "voices": [
-                                            {"key": "female_1", "label": "Female 1 (Narrator)", "gender": "female", "icon": "👩", "style": "Narrator", "is_custom": False},
-                                            {"key": "male_1", "label": "Male 1 (Narrator)", "gender": "male", "icon": "🧔", "style": "Narrator", "is_custom": False}
-                                        ],
-                                        "emotions": [
-                                            {"key": "neutral", "label": "Neutral / Normal", "icon": "😐"},
-                                            {"key": "cheerful", "label": "Happy & Cheerful", "icon": "😊"},
-                                            {"key": "narrator", "label": "Storyteller / Drama", "icon": "📖"},
-                                            {"key": "formal", "label": "Formal / News", "icon": "👔"},
-                                            {"key": "surprised", "label": "Excited & Surprised", "icon": "😲"}
-                                        ]
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    "responses": {"200": {"description": "Voice list"}}
                 }
             },
             "/generate": {
                 "post": {
-                    "tags": ["Speech Synthesis"],
-                    "summary": "Generate Tamil speech from text",
-                    "description": "Synthesizes natural Tamil speech using Fish Speech S2 / F5-TTS with custom voice and emotion parameters.",
-                    "requestBody": {
-                        "required": True,
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "type": "object",
-                                    "required": ["text"],
-                                    "properties": {
-                                        "text": {
-                                            "type": "string",
-                                            "example": "வணக்கம்! நீங்கள் எப்படி இருக்கிறீர்கள்?",
-                                            "description": "Tamil text, Tanglish, or English to synthesize"
-                                        },
-                                        "voice": {
-                                            "type": "string",
-                                            "default": "female_1",
-                                            "example": "female_1",
-                                            "description": "Speaker key (e.g. female_1, male_1, or custom cloned key)"
-                                        },
-                                        "emotion": {
-                                            "type": "string",
-                                            "default": "neutral",
-                                            "enum": ["neutral", "cheerful", "narrator", "formal", "surprised"],
-                                            "description": "Voice emotion style"
-                                        },
-                                        "speed": {
-                                            "type": "number",
-                                            "default": 1.0,
-                                            "minimum": 0.5,
-                                            "maximum": 2.0,
-                                            "description": "Speech speed multiplier"
-                                        },
-                                        "quality": {
-                                            "type": "integer",
-                                            "default": 30,
-                                            "minimum": 16,
-                                            "maximum": 64,
-                                            "description": "Inference quality (NFE steps)"
-                                        },
-                                        "stability": {
-                                            "type": "number",
-                                            "default": 0.75,
-                                            "minimum": 0.1,
-                                            "maximum": 1.0,
-                                            "description": "Voice stability factor"
-                                        },
-                                        "auto_translate": {
-                                            "type": "boolean",
-                                            "default": True,
-                                            "description": "Automatically translate English words into Tamil"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    "responses": {
-                        "200": {
-                            "description": "Speech successfully generated",
-                            "content": {
-                                "application/json": {
-                                    "example": {
-                                        "audio_b64": "UklGRuQEAABXQVZFZm10IBAAAAABAAEA...",
-                                        "voice": "female_1",
-                                        "voice_label": "Female 1 (Narrator)",
-                                        "speed": 1.0,
-                                        "quality": 30,
-                                        "stability": 0.75,
-                                        "emotion": "neutral",
-                                        "transliterated_text": "வணக்கம்! நீங்கள் எப்படி இருக்கிறீர்கள்?"
-                                    }
-                                }
-                            }
-                        },
-                        "400": {"description": "Invalid input text or parameters"},
-                        "500": {"description": "Server synthesis error"}
-                    }
+                    "summary": "Generate Tamil speech audio from text",
+                    "responses": {"200": {"description": "Generated audio in base64"}}
                 }
             },
             "/clone_voice": {
                 "post": {
-                    "tags": ["Voice Management"],
-                    "summary": "Clone a new voice profile (Zero-Shot)",
-                    "description": "Upload reference audio clips of a speaker to register an instant zero-shot cloned voice profile.",
-                    "requestBody": {
-                        "required": True,
-                        "content": {
-                            "multipart/form-data": {
-                                "schema": {
-                                    "type": "object",
-                                    "required": ["name", "audio_files"],
-                                    "properties": {
-                                        "name": {
-                                            "type": "string",
-                                            "example": "MyCustomVoice",
-                                            "description": "Unique display name for the cloned voice"
-                                        },
-                                        "gender": {
-                                            "type": "string",
-                                            "enum": ["male", "female", "neutral"],
-                                            "default": "neutral",
-                                            "description": "Speaker gender"
-                                        },
-                                        "icon": {
-                                            "type": "string",
-                                            "default": "🎙️",
-                                            "description": "Emoji icon for the profile"
-                                        },
-                                        "transcript": {
-                                            "type": "string",
-                                            "description": "Tamil transcript of reference audio (optional, auto-transcribed via Whisper if empty)"
-                                        },
-                                        "audio_files": {
-                                            "type": "array",
-                                            "items": {"type": "string", "format": "binary"},
-                                            "description": "One or more audio files (.wav or .mp3, 3-10 sec)"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    "responses": {
-                        "200": {
-                            "description": "Voice cloned successfully",
-                            "content": {
-                                "application/json": {
-                                    "example": {
-                                        "success": True,
-                                        "voice_key": "custom_mycustomvoice",
-                                        "label": "MyCustomVoice",
-                                        "gender": "male",
-                                        "icon": "🎙️",
-                                        "samples_count": 1,
-                                        "primary_transcript": "வணக்கம்"
-                                    }
-                                }
-                            }
-                        },
-                        "400": {"description": "Missing name or audio files"}
-                    }
+                    "summary": "Clone a custom voice with instant zero-shot adaptation",
+                    "responses": {"200": {"description": "Cloned voice metadata"}}
                 }
             },
             "/translate": {
                 "post": {
-                    "tags": ["Translation"],
-                    "summary": "Translate English or Tanglish to Tamil",
-                    "description": "Converts English text or Tanglish phonetic spelling into clean Tamil script.",
-                    "requestBody": {
-                        "required": True,
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "type": "object",
-                                    "required": ["text"],
-                                    "properties": {
-                                        "text": {
-                                            "type": "string",
-                                            "example": "vanakkam nanba eppadi irukinga",
-                                            "description": "English sentence or Tanglish text"
-                                        },
-                                        "mode": {
-                                            "type": "string",
-                                            "enum": ["translate", "transliterate"],
-                                            "default": "translate",
-                                            "description": "Neural translation ('translate') or phonetic transliteration ('transliterate')"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    "responses": {
-                        "200": {
-                            "description": "Translation successful",
-                            "content": {
-                                "application/json": {
-                                    "example": {
-                                        "original": "vanakkam nanba eppadi irukinga",
-                                        "translated": "வணக்கம் நண்பா எப்படி இருக்கீங்க",
-                                        "mode": "transliterate",
-                                        "source_detected": "en"
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    "summary": "Translate English or Tanglish text to Tamil",
+                    "responses": {"200": {"description": "Translated Tamil text"}}
                 }
             }
         }
@@ -904,333 +537,185 @@ def openapi_spec():
 
 
 @app.route("/docs", methods=["GET"])
-@app.route("/swagger", methods=["GET"])
 def swagger_ui():
     html = """<!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <title>Tamil TTS API — Swagger UI</title>
-  <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
-  <link rel="icon" type="image/png" href="https://unpkg.com/swagger-ui-dist@5/favicon-32x32.png" />
-  <style>
-    html { box-sizing: border-box; overflow: -moz-scrollbars-vertical; overflow-y: scroll; }
-    *, *:before, *:after { box-sizing: inherit; }
-    body { margin: 0; background: #fafafa; font-family: sans-serif; }
-    .topbar { display: none !important; }
-  </style>
+    <title>🎙️ Indic F5 Tamil TTS — API Documentation</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎙️</text></svg>">
 </head>
 <body>
-  <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" charset="UTF-8"></script>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js" charset="UTF-8"></script>
-  <script>
-    window.onload = function() {
-      window.ui = SwaggerUIBundle({
-        url: "/openapi.json",
-        dom_id: '#swagger-ui',
-        deepLinking: true,
-        presets: [
-          SwaggerUIBundle.presets.apis,
-          SwaggerUIStandalonePreset
-        ],
-        layout: "BaseLayout"
-      });
-    };
-  </script>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js"></script>
+    <script>
+        SwaggerUIBundle({
+            url: '/openapi.json',
+            dom_id: '#swagger-ui',
+            deepLinking: true,
+            presets: [SwaggerUIBundle.presets.apis]
+        });
+    </script>
 </body>
 </html>"""
     return Response(html, mimetype="text/html")
 
 
-@app.route("/translate", methods=["POST"])
-def translate():
-    data = request.get_json() or {}
-    text = (data.get("text") or "").strip()
-    mode = data.get("mode", "translate")
-
-    if not text:
-        return jsonify({"error": "Text is empty"}), 400
-
-    try:
-        if mode == "transliterate":
-            result = transliterate_to_tamil(text)
-        else:
-            result = translate_english_to_tamil(text)
-
-        result = normalize_numbers_in_tamil(result)
-        has_english = bool(re.search(r'[a-zA-Z]', text))
-        return jsonify({
-            "original": text,
-            "translated": result,
-            "mode": mode,
-            "source_detected": "en" if has_english else "ta"
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route("/voices", methods=["GET"])
-def get_voices():
+def list_voices():
+    """Returns available speakers and emotions."""
     voices = get_available_voices()
+    voice_list = []
+    for k, v in voices.items():
+        voice_list.append({
+            "key": k,
+            "label": v["label"],
+            "gender": v["gender"],
+            "icon": v["icon"],
+            "style": v["default_style"],
+            "is_custom": v["is_custom"]
+        })
+
+    emotion_list = []
+    for k, v in EMOTION_STYLES.items():
+        emotion_list.append({
+            "key": k,
+            "label": v["label"],
+            "icon": v["icon"]
+        })
+
     return jsonify({
-        "voices": [
-            {
-                "key": k,
-                "label": v["label"],
-                "gender": v["gender"],
-                "icon": v["icon"],
-                "style": v["default_style"],
-                "is_custom": v.get("is_custom", False),
-                "has_custom_audio": os.path.exists(v["path"])
-            }
-            for k, v in voices.items()
-        ],
-        "emotions": [
-            {
-                "key": k,
-                "label": v["label"],
-                "icon": v["icon"]
-            }
-            for k, v in EMOTION_STYLES.items()
-        ]
+        "voices": voice_list,
+        "emotions": emotion_list,
+        "default_voice": "female_1" if "female_1" in voices else (list(voices.keys())[0] if voices else "")
     })
 
 
-def sync_voice_to_training_dataset(safe_key, sample_refs, gender):
-    """
-    Syncs new voice reference WAVs and transcripts into training_dataset/wavs,
-    updates metadata.csv, train.txt, val.txt, and dataset_summary.json.
-    """
+@app.route("/transcribe", methods=["POST"])
+def transcribe_audio():
+    """Auto-transcribes uploaded voice sample using Whisper ASR."""
+    if "audio" not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
+
+    audio_file = request.files["audio"]
+    temp_path = os.path.join(DATASET_DIR, f"temp_transcribe_{int(time.time()*1000)}.wav")
+    os.makedirs(DATASET_DIR, exist_ok=True)
+    audio_file.save(temp_path)
+
     try:
-        train_dir = "training_dataset"
-        wavs_dir = os.path.join(train_dir, "wavs")
-        os.makedirs(wavs_dir, exist_ok=True)
+        load_whisper()
+        if whisper_model is None:
+            return jsonify({"transcript": "வணக்கம், நீங்கள் எப்படி இருக்கிறீர்கள்?"})
 
-        meta_csv_path = os.path.join(train_dir, "metadata.csv")
-        existing_rows = []
-        existing_files = set()
-
-        if os.path.exists(meta_csv_path):
-            with open(meta_csv_path, "r", encoding="utf-8") as f:
-                _ = f.readline()  # skip header
-                for line in f:
-                    parts = line.strip().split("|")
-                    if len(parts) >= 5:
-                        try:
-                            dur = float(parts[4])
-                        except Exception:
-                            dur = 0.0
-                        existing_rows.append({
-                            "audio_file": parts[0],
-                            "transcript": parts[1],
-                            "speaker_id": parts[2],
-                            "gender": parts[3],
-                            "duration": dur
-                        })
-                        existing_files.add(parts[0])
-
-        for idx, ref in enumerate(sample_refs, 1):
-            train_wav_name = f"{safe_key}_{idx:04d}.wav"
-            train_wav_path = os.path.join(wavs_dir, train_wav_name)
-            shutil.copyfile(ref["wav"], train_wav_path)
-
-            row = {
-                "audio_file": train_wav_name,
-                "transcript": ref["txt"],
-                "speaker_id": safe_key,
-                "gender": gender,
-                "duration": ref["duration"]
-            }
-            if train_wav_name in existing_files:
-                for r in existing_rows:
-                    if r["audio_file"] == train_wav_name:
-                        r.update(row)
-            else:
-                existing_rows.append(row)
-                existing_files.add(train_wav_name)
-
-        # Write updated metadata.csv
-        with open(meta_csv_path, "w", encoding="utf-8") as f:
-            f.write("audio_file|transcript|speaker_id|gender|duration\n")
-            for r in existing_rows:
-                f.write(f"{r['audio_file']}|{r['transcript']}|{r['speaker_id']}|{r['gender']}|{r['duration']}\n")
-
-        # Write train.txt & val.txt
-        import random
-        random.seed(42)
-        shuffled = list(existing_rows)
-        random.shuffle(shuffled)
-        split_idx = max(int(len(shuffled) * 0.85), 1)
-        train_set = shuffled[:split_idx]
-        val_set = shuffled[split_idx:]
-
-        with open(os.path.join(train_dir, "train.txt"), "w", encoding="utf-8") as f:
-            for m in train_set:
-                f.write(f"wavs/{m['audio_file']}|{m['transcript']}|{m['speaker_id']}\n")
-
-        with open(os.path.join(train_dir, "val.txt"), "w", encoding="utf-8") as f:
-            for m in val_set:
-                f.write(f"wavs/{m['audio_file']}|{m['transcript']}|{m['speaker_id']}\n")
-
-        # Update dataset_summary.json
-        summary = {
-            "total_samples": len(existing_rows),
-            "total_duration_seconds": round(sum(m["duration"] for m in existing_rows), 2),
-            "speakers": {}
-        }
-        for m in existing_rows:
-            spk = m["speaker_id"]
-            if spk not in summary["speakers"]:
-                summary["speakers"][spk] = {"count": 0, "total_duration": 0.0, "gender": m["gender"]}
-            summary["speakers"][spk]["count"] += 1
-            summary["speakers"][spk]["total_duration"] = round(summary["speakers"][spk]["total_duration"] + m["duration"], 2)
-
-        with open(os.path.join(train_dir, "dataset_summary.json"), "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2)
-
-        print(f"[Training Dataset] ✅ Synced '{safe_key}' ({len(sample_refs)} clips) to training_dataset/ (Total: {len(existing_rows)} samples)", flush=True)
+        result = whisper_model.transcribe(temp_path, language="ta")
+        transcript = result.get("text", "").strip()
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        return jsonify({"transcript": transcript if transcript else "வணக்கம்"})
     except Exception as e:
-        print(f"[Training Dataset] Warning syncing to training dataset: {e}", flush=True)
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        return jsonify({"transcript": "வணக்கம்", "warning": str(e)})
+
+
+@app.route("/translate", methods=["POST"])
+def translate_api():
+    """Translates English or phonetic Tanglish to pure Tamil script."""
+    data = request.json or {}
+    text = data.get("text", "").strip()
+    mode = data.get("mode", "auto")
+
+    if not text:
+        return jsonify({"translated_text": "", "original_text": ""})
+
+    if mode == "phonetic":
+        translated = transliterate_to_tamil(text)
+    elif mode == "translate":
+        translated = translate_english_to_tamil(text)
+    else:
+        if re.search(r'[a-zA-Z]', text):
+            translated = translate_english_to_tamil(text)
+        else:
+            translated = text
+
+    normalized = normalize_numbers_in_tamil(translated)
+    return jsonify({
+        "original_text": text,
+        "translated_text": normalized
+    })
 
 
 @app.route("/clone_voice", methods=["POST"])
 def clone_voice():
-    """
-    Endpoint to add a new custom cloned voice profile:
-    Accepts 1 or more sample audio files or audio blobs, merges & normalizes them,
-    respects manual user transcript if provided (or auto-transcribes via Whisper if empty),
-    registers the new speaker profile, and syncs to training_dataset/.
-    """
+    """Upload new voice clip to dynamically create a cloned voice profile."""
+    if "audio" not in request.files:
+        return jsonify({"error": "No audio file uploaded"}), 400
+
+    voice_name = request.form.get("name", "").strip()
+    voice_gender = request.form.get("gender", "neutral")
+    voice_style = request.form.get("style", "Natural")
+    custom_transcript = request.form.get("transcript", "").strip()
+
+    if not voice_name:
+        voice_name = f"Custom Voice {int(time.time())}"
+
+    voice_id = "custom_" + re.sub(r'[^a-zA-Z0-9_]', '_', voice_name.lower())
+    spk_dir = os.path.join(DATASET_DIR, voice_id)
+    os.makedirs(spk_dir, exist_ok=True)
+
+    audio_file = request.files["audio"]
+    ref_wav_path = os.path.join(spk_dir, "reference.wav")
+    audio_file.save(ref_wav_path)
+
+    # Standardize audio
     try:
-        voice_name = request.form.get("name", "").strip()
-        gender = request.form.get("gender", "neutral").strip()
-        icon = request.form.get("icon", "🎙️").strip()
-        custom_transcript = request.form.get("transcript", "").strip()
-
-        if not voice_name:
-            return jsonify({"error": "Voice name is required"}), 400
-
-        # Create unique ID for the voice
-        safe_key = re.sub(r'[^a-zA-Z0-9_]', '_', voice_name.lower())
-        safe_key = f"custom_{safe_key}" if not safe_key.startswith("custom_") else safe_key
-
-        target_dir = os.path.join(DATASET_DIR, safe_key)
-        os.makedirs(target_dir, exist_ok=True)
-
-        files = request.files.getlist("audio_files")
-        if not files or len(files) == 0:
-            return jsonify({"error": "No audio files uploaded"}), 400
-
-        sample_refs = []
-        target_sr = 24000
-
-        for f_idx, file_obj in enumerate(files, 1):
-            temp_path = os.path.join(target_dir, f"temp_sample_{f_idx}.wav")
-            file_obj.save(temp_path)
-
-            try:
-                data, sr = sf.read(temp_path)
-                if data.ndim > 1:
-                    data = np.mean(data, axis=1)
-                
-                # Standardize sample rate to 24kHz
-                if sr != target_sr:
-                    num_samples = int(len(data) * (target_sr / sr))
-                    data = np.interp(
-                        np.linspace(0, len(data), num_samples, endpoint=False),
-                        np.arange(len(data)),
-                        data
-                    )
-
-                # Normalize individual clip
-                clip_peak = np.max(np.abs(data))
-                if clip_peak > 0:
-                    data = (data / clip_peak) * 0.95
-
-                ref_wav_name = f"reference_{f_idx:03d}.wav"
-                ref_txt_name = f"reference_{f_idx:03d}.txt"
-                ref_wav_path = os.path.join(target_dir, ref_wav_name)
-                ref_txt_path = os.path.join(target_dir, ref_txt_name)
-                sf.write(ref_wav_path, data, samplerate=target_sr)
-
-                # Priority: 1. Manual user transcript, 2. Whisper auto-transcription, 3. Default fallback
-                clip_transcript = ""
-                if custom_transcript:
-                    # User manually provided transcript - DO NOT overwrite with Whisper!
-                    clip_transcript = custom_transcript
-                    print(f"[Clone] Using manual user transcript for clip {f_idx:03d}: '{clip_transcript}'", flush=True)
-                else:
-                    load_whisper()
-                    if whisper_model:
-                        try:
-                            asr_res = whisper_model.transcribe(ref_wav_path, language="ta", fp16=False)
-                            clip_transcript = asr_res.get("text", "").strip()
-                            print(f"[Whisper] Auto-transcribed clip {f_idx:03d}: '{clip_transcript}'", flush=True)
-                        except Exception as e:
-                            print(f"[Whisper] Sample {f_idx} transcription error: {e}", flush=True)
-
-                if not clip_transcript:
-                    clip_transcript = "வணக்கம்"
-
-                with open(ref_txt_path, "w", encoding="utf-8") as f:
-                    f.write(clip_transcript)
-
-                sample_refs.append({
-                    "wav": ref_wav_path,
-                    "txt": clip_transcript,
-                    "duration": round(len(data) / target_sr, 2)
-                })
-                print(f"[Clone] Clip {f_idx:03d} saved: '{ref_wav_name}' ({len(data)/target_sr:.2f}s) -> '{clip_transcript}'", flush=True)
-
-            except Exception as e:
-                print(f"[Clone] Error processing sample {f_idx}: {e}", flush=True)
-            finally:
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-
-        if not sample_refs:
-            return jsonify({"error": "Failed to decode any valid audio files"}), 400
-
-        # Set default primary reference to the first clean sample
-        shutil.copyfile(sample_refs[0]["wav"], os.path.join(target_dir, "reference.wav"))
-        with open(os.path.join(target_dir, "transcript.txt"), "w", encoding="utf-8") as f:
-            f.write(sample_refs[0]["txt"])
-
-        custom_meta = get_custom_voices_metadata()
-        custom_meta[safe_key] = {
-            "label": voice_name,
-            "gender": gender,
-            "icon": icon,
-            "default_style": "Custom Cloned",
-            "samples_count": len(sample_refs),
-            "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-        save_custom_voices_metadata(custom_meta)
-
-        # Sync cloned voice clips directly into training_dataset/
-        sync_voice_to_training_dataset(safe_key, sample_refs, gender)
-
-        print(f"[Clone] ✅ Successfully cloned '{voice_name}' with {len(sample_refs)} distinct reference samples and transcripts!", flush=True)
-        return jsonify({
-            "success": True,
-            "voice_key": safe_key,
-            "label": voice_name,
-            "gender": gender,
-            "icon": icon,
-            "samples_count": len(sample_refs),
-            "primary_transcript": sample_refs[0]["txt"]
-        })
-
+        data, sr = sf.read(ref_wav_path)
+        if data.ndim > 1:
+            data = data.mean(axis=-1)
+        sf.write(ref_wav_path, data, sr, format='WAV')
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        print(f"[Clone] Error standardizing audio: {e}", flush=True)
+
+    # Transcript resolution
+    transcript = custom_transcript
+    if not transcript:
+        try:
+            load_whisper()
+            if whisper_model is not None:
+                res = whisper_model.transcribe(ref_wav_path, language="ta")
+                transcript = res.get("text", "").strip()
+        except Exception:
+            pass
+
+    if not transcript:
+        transcript = "வணக்கம், இது எனது சொந்த குரல் பதிவு."
+
+    with open(os.path.join(spk_dir, "transcript.txt"), "w", encoding="utf-8") as f:
+        f.write(transcript)
+
+    meta = get_custom_voices_metadata()
+    meta[voice_id] = {
+        "label": voice_name,
+        "gender": voice_gender,
+        "icon": "🎙️",
+        "default_style": voice_style,
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
+    save_custom_voices_metadata(meta)
+
+    return jsonify({
+        "success": True,
+        "voice_id": voice_id,
+        "label": voice_name,
+        "transcript": transcript,
+        "message": f"Successfully created cloned speaker profile '{voice_name}'!"
+    })
 
 
 @app.route("/generate", methods=["POST"])
 def generate():
-    data = request.get_json() or {}
+    """Generates Tamil speech audio."""
+    data = request.json or {}
     text = (data.get("text") or "").strip()
     voice_key = data.get("voice", "female_1")
     speed = float(data.get("speed", 1.0))
@@ -1248,7 +733,6 @@ def generate():
 
     voice = voices[voice_key]
 
-    # Auto-translate or transliterate if text contains English
     processed_text = text
     if auto_translate and re.search(r'[a-zA-Z]', text):
         processed_text = translate_english_to_tamil(text)
@@ -1258,7 +742,7 @@ def generate():
     processed_text = normalize_numbers_in_tamil(processed_text)
 
     try:
-        audio_bytes = synthesize_speech_fish(
+        audio_bytes = synthesize_speech_indic(
             processed_text,
             voice["path"],
             voice["text"],
@@ -1286,7 +770,7 @@ def generate():
 
 @app.route("/fine_tune", methods=["POST"])
 def fine_tune():
-    """Runs Fish Speech S2 multi-speaker fine-tuning & adaptation on dataset/training_dataset."""
+    """Runs Indic F5 multi-speaker fine-tuning on dataset/training_dataset."""
     try:
         import subprocess
         proc = subprocess.run([sys.executable, "train_local_cpu.py"], capture_output=True, text=True)
@@ -1302,11 +786,11 @@ def fine_tune():
 
 
 if __name__ == "__main__":
-    load_fish_speech_s2_pipeline()
+    load_indic_f5_pipeline()
 
     voices = get_available_voices()
     print("\n" + "=" * 65, flush=True)
-    print("🎙️ Neural Tamil TTS & Zero-Shot Voice Cloning Server", flush=True)
+    print("🎙️ Indic F5 Neural Tamil TTS & Zero-Shot Voice Cloning Server", flush=True)
     print(f"🎙️ Available Voices: {len(voices)} speaker profiles", flush=True)
     for k, v in voices.items():
         custom_tag = " (Custom)" if v.get("is_custom") else ""

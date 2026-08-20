@@ -1,7 +1,7 @@
 @echo off
-title Fish Speech S2 Tamil TTS
+title Indic F5 Tamil TTS Studio
 echo ========================================================
-echo   Starting Fish Speech S2 Tamil TTS Local Server
+echo   Starting Indic F5 Tamil TTS Local Server
 echo ========================================================
 echo.
 

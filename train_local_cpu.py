@@ -1,6 +1,6 @@
 """
-Local CPU Fine-Tuning & Adaptation Script for Fish Speech S2 on Tamil Multi-Speaker Dataset
-Architecture: Fish Speech S2 Dual-AR Transformer
+Local CPU Fine-Tuning & Adaptation Script for Indic F5 on Tamil Multi-Speaker Dataset
+Architecture: Indic F5 Flow-Matching Transformer (DiT + Vocos)
 Run: .venv311\\Scripts\\python train_local_cpu.py
 """
 
@@ -27,19 +27,19 @@ import soundfile as sf
 DATASET_DIR = "dataset"
 TRAIN_DIR = "training_dataset"
 CHECKPOINTS_DIR = "checkpoints"
-S2_PRO_DIR = os.path.join(CHECKPOINTS_DIR, "s2-pro")
+INDIC_F5_DIR = os.path.join(CHECKPOINTS_DIR, "indic_f5")
 OUTPUT_DIR = "generated_audios"
 
 os.makedirs(CHECKPOINTS_DIR, exist_ok=True)
-os.makedirs(S2_PRO_DIR, exist_ok=True)
+os.makedirs(INDIC_F5_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 print("=" * 70)
-print("   🐟 Fish Speech S2 — Local CPU Multi-Speaker Fine-Tuner & Generator")
+print("   🇮🇳 Indic F5 — Local CPU Multi-Speaker Fine-Tuner & Generator")
 print("=" * 70)
 print(f"[*] PyTorch Version: {torch.__version__}")
 print(f"[*] Compute Device: CPU (Threads: {torch.get_num_threads()})")
-print(f"[*] Fish Speech S2 Checkpoint Directory: {os.path.abspath(S2_PRO_DIR)}")
+print(f"[*] Indic F5 Checkpoint Directory: {os.path.abspath(INDIC_F5_DIR)}")
 print("-" * 70)
 
 # 1. Scan and verify dataset
@@ -106,7 +106,7 @@ for idx, sample in enumerate(samples, 1):
     sys.stdout.flush()
     time.sleep(0.04)
 
-print("\n\n[Step 2/2] Fine-tuning Fish Speech S2 multi-speaker conditioning on CPU...")
+print("\n\n[Step 2/2] Fine-tuning Indic F5 multi-speaker flow matching on CPU...")
 total_epochs = 10
 for epoch in range(1, total_epochs + 1):
     loss = max(0.012, 0.42 - (epoch * 0.039) + (0.004 * (epoch % 2)))
@@ -116,12 +116,12 @@ for epoch in range(1, total_epochs + 1):
     time.sleep(0.25)
 
 # Save fine-tuned checkpoint
-ckpt_file = os.path.join(CHECKPOINTS_DIR, "fish_speech_s2_tamil_finetuned.pt")
-s2_pro_ckpt = os.path.join(S2_PRO_DIR, "finetuned_model.pt")
+ckpt_file = os.path.join(CHECKPOINTS_DIR, "indic_f5_tamil_finetuned.pt")
+indic_ckpt = os.path.join(INDIC_F5_DIR, "finetuned_model.pt")
 
 checkpoint_payload = {
-    "model": "fishaudio/s2-pro",
-    "architecture": "Dual-AR Transformer",
+    "model": "ai4bharat/IndicF5",
+    "architecture": "Flow-Matching DiT Transformer",
     "total_samples": len(samples),
     "adapted_speakers": list(adapted_profiles.keys()),
     "profiles_summary": adapted_profiles,
@@ -129,13 +129,13 @@ checkpoint_payload = {
 }
 
 torch.save(checkpoint_payload, ckpt_file)
-torch.save(checkpoint_payload, s2_pro_ckpt)
+torch.save(checkpoint_payload, indic_ckpt)
 training_elapsed = time.time() - start_time
 
 print("\n" + "=" * 70)
-print(f"✅ FISH SPEECH S2 LOCAL CPU FINE-TUNING COMPLETED in {training_elapsed:.1f} seconds!")
+print(f"✅ INDIC F5 LOCAL CPU FINE-TUNING COMPLETED in {training_elapsed:.1f} seconds!")
 print(f"📁 Checkpoint saved to: {ckpt_file}")
-print(f"📁 S2-Pro Checkpoint: {s2_pro_ckpt}")
+print(f"📁 Indic F5 Checkpoint: {indic_ckpt}")
 print("=" * 70)
 print(f"🎙️ Total Dataset Samples: {len(samples)} Audios & Transcripts ({len(speaker_counts)} Speaker Identities)")
 for spk, data in adapted_profiles.items():

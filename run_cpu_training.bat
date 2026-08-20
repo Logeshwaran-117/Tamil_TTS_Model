@@ -1,7 +1,7 @@
 @echo off
-title Fish Speech S2 - CPU Fine-Tuning
+title Indic F5 - CPU Fine-Tuning
 echo ========================================================
-echo   Fish Speech S2 Tamil Voice CPU Fine-Tuning
+echo   Indic F5 Tamil Voice CPU Fine-Tuning
 echo ========================================================
 echo.
 
