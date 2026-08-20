@@ -94,11 +94,72 @@ fish_codec = None
 using_fish_s2 = False
 
 
+def load_codec_model_robust(codec_checkpoint_path, device, precision=torch.bfloat16):
+    """Load the DAC codec model for audio encoding/decoding robustly across any fish-speech version."""
+    try:
+        from fish_speech.models.text2semantic.inference import load_codec_model
+        return load_codec_model(codec_checkpoint_path, device, precision)
+    except Exception:
+        pass
+
+    try:
+        from fish_speech.models.dac.inference import load_model as load_dac_model
+        return load_dac_model("modded_dac_vq", codec_checkpoint_path, device=device)
+    except Exception:
+        pass
+
+    import fish_speech
+    from hydra.utils import instantiate
+    from omegaconf import OmegaConf
+    config_path = os.path.join(fish_speech.__path__[0], "configs", "modded_dac_vq.yaml")
+    cfg = OmegaConf.load(config_path)
+    codec = instantiate(cfg)
+    state_dict = torch.load(codec_checkpoint_path, map_location="cpu")
+    if "state_dict" in state_dict:
+        state_dict = state_dict["state_dict"]
+    if any("generator" in k for k in state_dict):
+        state_dict = {k.replace("generator.", ""): v for k, v in state_dict.items() if "generator." in k}
+    codec.load_state_dict(state_dict, strict=False)
+    codec.eval()
+    codec.to(device=device, dtype=precision)
+    return codec
+
+
+def encode_audio_robust(audio_path, codec, device):
+    """Encode audio into VQ prompt tokens."""
+    try:
+        from fish_speech.models.text2semantic.inference import encode_audio
+        return encode_audio(audio_path, codec, device)
+    except Exception:
+        pass
+
+    wav, sr = torchaudio.load(str(audio_path))
+    if wav.shape[0] > 1:
+        wav = wav.mean(dim=0, keepdim=True)
+    wav = torchaudio.functional.resample(wav.to(device), sr, codec.sample_rate)[0]
+    model_dtype = next(codec.parameters()).dtype
+    audios = wav[None, None].to(dtype=model_dtype)
+    audio_lengths = torch.tensor([len(wav)], device=device, dtype=torch.long)
+    indices, feature_lengths = codec.encode(audios, audio_lengths)
+    return indices[0, :, : feature_lengths[0]]
+
+
+def decode_to_audio_robust(codes, codec):
+    """Decode VQ tokens to audio waveform."""
+    try:
+        from fish_speech.models.text2semantic.inference import decode_to_audio
+        return decode_to_audio(codes, codec)
+    except Exception:
+        pass
+    audio = codec.from_indices(codes[None])
+    return audio[0, 0]
+
+
 def load_fish_speech_s2_pipeline():
     """Load official Fish Speech S2 Dual-AR Transformer + DAC VQ-GAN vocoder."""
     global fish_model, fish_decode_func, fish_codec, using_fish_s2
     try:
-        from fish_speech.models.text2semantic.inference import init_model, load_codec_model
+        from fish_speech.models.text2semantic.inference import init_model
         print("\n=======================================================", flush=True)
         print(f"  🐟 Initializing Official Fish Speech S2 Dual-AR Model ({device.upper()})...", flush=True)
         print("=======================================================", flush=True)
@@ -117,11 +178,13 @@ def load_fish_speech_s2_pipeline():
                 dtype=next(fish_model.parameters()).dtype
             )
         codec_ckpt = os.path.join(S2_PRO_DIR, "codec.pth")
-        fish_codec = load_codec_model(codec_ckpt, device=device, precision=precision)
+        fish_codec = load_codec_model_robust(codec_ckpt, device=device, precision=precision)
         using_fish_s2 = True
         print(f"[Fish S2] ✅ Official Fish Speech S2 Dual-AR Engine is 100% Ready on {device}!\n", flush=True)
         return True
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"[Fish S2] Error loading Fish Speech S2: {e}", flush=True)
         return False
 
@@ -131,6 +194,7 @@ def load_whisper():
     global whisper_model
     if whisper_model is None:
         try:
+            # pyrefly: ignore [missing-import]
             import whisper
             print("[Whisper] Loading Whisper ASR model for Tamil speech transcription...", flush=True)
             whisper_model = whisper.load_model("small", download_root=WHISPER_CACHE_DIR, device=device)
@@ -331,10 +395,11 @@ def synthesize_speech_fish(text, ref_audio_path, ref_transcript, speed=1.0, qual
     text = normalize_numbers_in_tamil(text)
     start_time = time.time()
 
-    from fish_speech.models.text2semantic.inference import encode_audio, generate_long, decode_to_audio
+    # pyrefly: ignore [missing-import]
+    from fish_speech.models.text2semantic.inference import generate_long
     print(f"[Fish Speech S2] Dual-AR Synthesis for: '{text[:50]}...' with voice: {os.path.basename(ref_audio_path)}", flush=True)
     
-    prompt_tokens = [encode_audio(ref_audio_path, fish_codec, device).cpu()]
+    prompt_tokens = [encode_audio_robust(ref_audio_path, fish_codec, device).cpu()]
     prompt_text = [ref_transcript.strip() if ref_transcript.strip() else "வணக்கம்"]
     
     temperature = max(0.2, min(float(stability), 1.2))
@@ -357,7 +422,7 @@ def synthesize_speech_fish(text, ref_audio_path, ref_transcript, speed=1.0, qual
             codes.append(response.codes)
         elif response.action == "next" and codes:
             merged_codes = torch.cat(codes, dim=1)
-            audio_tensor = decode_to_audio(merged_codes.to(device), fish_codec)
+            audio_tensor = decode_to_audio_robust(merged_codes.to(device), fish_codec)
             final_wave = audio_tensor.cpu().float().numpy()
             max_peak = np.max(np.abs(final_wave))
             if max_peak > 0:

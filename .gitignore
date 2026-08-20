@@ -46,10 +46,12 @@ checkpoints/
 *.ckpt
 
 # Datasets & Generated Audio files
-dataset/
 generated_audios/
 training_dataset/wavs/
 *.wav
+!dataset/**/*.wav
+!dataset/**/*.txt
+!dataset/**/*.json
 *.mp3
 *.flac
 *.ogg
