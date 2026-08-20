@@ -155,10 +155,74 @@ def decode_to_audio_robust(codes, codec):
     return audio[0, 0]
 
 
+def patch_llama_for_fish_qwen3_omni():
+    """Patches older fish-speech llama module to support fish_qwen3_omni architecture."""
+    try:
+        import dataclasses
+        from pathlib import Path
+        import fish_speech.models.text2semantic.llama as llama_mod
+        orig_from_pretrained = llama_mod.BaseModelArgs.from_pretrained
+
+        def patched_from_pretrained(path):
+            p = Path(path)
+            if p.is_dir():
+                p = p / "config.json"
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("model_type") == "fish_qwen3_omni" and not hasattr(llama_mod.BaseModelArgs, "_from_fish_qwen3_omni"):
+                tc = data.get("text_config", {})
+                adc = data.get("audio_decoder_config", {})
+                flat = dict(
+                    model_type="dual_ar",
+                    vocab_size=tc.get("vocab_size", 32000),
+                    n_layer=tc.get("n_layer", 32),
+                    n_head=tc.get("n_head", 32),
+                    n_local_heads=tc.get("n_local_heads", -1),
+                    head_dim=tc.get("head_dim"),
+                    dim=tc.get("dim", 2560),
+                    intermediate_size=tc.get("intermediate_size"),
+                    rope_base=tc.get("rope_base", 10000),
+                    norm_eps=tc.get("norm_eps", 1e-5),
+                    max_seq_len=tc.get("max_seq_len", 2048),
+                    dropout=tc.get("dropout", 0.0),
+                    tie_word_embeddings=tc.get("tie_word_embeddings", True),
+                    attention_qkv_bias=tc.get("attention_qkv_bias", False),
+                    attention_o_bias=tc.get("attention_o_bias", False),
+                    attention_qk_norm=tc.get("attention_qk_norm", False),
+                    use_gradient_checkpointing=tc.get("use_gradient_checkpointing", True),
+                    initializer_range=tc.get("initializer_range", 0.02),
+                    semantic_begin_id=data.get("semantic_start_token_id", 0),
+                    semantic_end_id=data.get("semantic_end_token_id", 0),
+                    scale_codebook_embeddings=True,
+                    norm_fastlayer_input=True,
+                    audio_embed_dim=adc.get("text_dim", tc.get("dim", 2560)),
+                    codebook_size=adc.get("vocab_size", 4096),
+                    num_codebooks=adc.get("num_codebooks", 10),
+                    n_fast_layer=adc.get("n_layer", 4),
+                    fast_dim=adc.get("dim"),
+                    fast_n_head=adc.get("n_head"),
+                    fast_n_local_heads=adc.get("n_local_heads"),
+                    fast_head_dim=adc.get("head_dim"),
+                    fast_intermediate_size=adc.get("intermediate_size"),
+                    fast_attention_qkv_bias=adc.get("attention_qkv_bias"),
+                    fast_attention_qk_norm=adc.get("attention_qk_norm"),
+                    fast_attention_o_bias=adc.get("attention_o_bias"),
+                )
+                valid_keys = {f.name for f in dataclasses.fields(llama_mod.DualARModelArgs)}
+                flat = {k: v for k, v in flat.items() if k in valid_keys}
+                return llama_mod.DualARModelArgs(**flat)
+            return orig_from_pretrained(path)
+
+        llama_mod.BaseModelArgs.from_pretrained = staticmethod(patched_from_pretrained)
+    except Exception:
+        pass
+
+
 def load_fish_speech_s2_pipeline():
     """Load official Fish Speech S2 Dual-AR Transformer + DAC VQ-GAN vocoder."""
     global fish_model, fish_decode_func, fish_codec, using_fish_s2
     try:
+        patch_llama_for_fish_qwen3_omni()
         from fish_speech.models.text2semantic.inference import init_model
         print("\n=======================================================", flush=True)
         print(f"  🐟 Initializing Official Fish Speech S2 Dual-AR Model ({device.upper()})...", flush=True)
