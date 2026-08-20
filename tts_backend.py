@@ -24,6 +24,7 @@ CACHE_ROOT = os.path.abspath("cache")
 os.environ["PIP_CACHE_DIR"] = os.path.join(CACHE_ROOT, "pip")
 os.environ["TORCH_HOME"] = os.path.join(CACHE_ROOT, "torch")
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 import io
 import re
@@ -224,9 +225,10 @@ model_load_error = None
 
 def load_fish_model_direct_gpu(checkpoint_dir, device="cuda", precision=torch.bfloat16):
     """
-    Directly streams model weights onto GPU VRAM in bfloat16 shard by shard.
-    Uses ~4.5 GB GPU VRAM and avoids high System RAM exhaustion.
+    Directly streams model weights onto GPU VRAM in bfloat16 in-place.
+    Uses only ~4.8 GB GPU VRAM and ~5 GB System RAM (zero duplicate GPU buffers).
     """
+    import gc
     from pathlib import Path
     from safetensors.torch import load_file as st_load_file
     from fish_speech.tokenizer import FishTokenizer
@@ -240,7 +242,11 @@ def load_fish_model_direct_gpu(checkpoint_dir, device="cuda", precision=torch.bf
     config.semantic_begin_id = tokenizer.semantic_begin_id
     config.semantic_end_id = tokenizer.semantic_end_id
 
-    print(f"[Fish S2] Allocating DualARTransformer directly on {device.upper()} ({precision})...", flush=True)
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    gc.collect()
+
+    print(f"[Fish S2] Allocating DualARTransformer in {device.upper()} VRAM ({precision})...", flush=True)
     with torch.device(device):
         model = llama_mod.DualARTransformer(config).to(device=device, dtype=precision)
 
@@ -249,35 +255,47 @@ def load_fish_model_direct_gpu(checkpoint_dir, device="cuda", precision=torch.bf
     single_st = path_obj / "model.safetensors"
     pth_file = path_obj / "model.pth"
 
+    model_state = model.state_dict()
+
     if index_json.exists():
         with open(index_json) as f:
             st_index = json.load(f)
         shard_files = sorted(set(st_index["weight_map"].values()))
         for shard in shard_files:
-            print(f"  📥 Loading shard {shard} directly into GPU VRAM...", flush=True)
-            shard_weights = st_load_file(str(path_obj / shard), device=device)
-            shard_weights = {k: v.to(dtype=precision, device=device) for k, v in shard_weights.items()}
+            print(f"  📥 Streaming shard {shard} into GPU VRAM in-place...", flush=True)
+            shard_weights = st_load_file(str(path_obj / shard), device="cpu")
             if hasattr(llama_mod, "_remap_fish_qwen3_omni_keys"):
                 shard_weights = llama_mod._remap_fish_qwen3_omni_keys(shard_weights)
-            model.load_state_dict(shard_weights, strict=False, assign=True)
+            
+            with torch.no_grad():
+                for k, v in shard_weights.items():
+                    if k in model_state:
+                        model_state[k].copy_(v.to(device=device, dtype=precision, non_blocking=True))
             del shard_weights
+            gc.collect()
             if device == "cuda":
                 torch.cuda.empty_cache()
     elif single_st.exists():
-        print(f"  📥 Loading single safetensors directly into GPU VRAM...", flush=True)
-        weights = st_load_file(str(single_st), device=device)
-        weights = {k: v.to(dtype=precision, device=device) for k, v in weights.items()}
+        print(f"  📥 Streaming single safetensors into GPU VRAM in-place...", flush=True)
+        weights = st_load_file(str(single_st), device="cpu")
         if hasattr(llama_mod, "_remap_fish_qwen3_omni_keys"):
             weights = llama_mod._remap_fish_qwen3_omni_keys(weights)
-        model.load_state_dict(weights, strict=False, assign=True)
+        with torch.no_grad():
+            for k, v in weights.items():
+                if k in model_state:
+                    model_state[k].copy_(v.to(device=device, dtype=precision, non_blocking=True))
         del weights
+        gc.collect()
         if device == "cuda":
             torch.cuda.empty_cache()
     elif pth_file.exists():
-        weights = torch.load(pth_file, map_location=device, weights_only=True)
+        weights = torch.load(pth_file, map_location="cpu", weights_only=True)
         if "state_dict" in weights:
             weights = weights["state_dict"]
-        model.load_state_dict(weights, strict=False, assign=True)
+        with torch.no_grad():
+            for k, v in weights.items():
+                if k in model_state:
+                    model_state[k].copy_(v.to(device=device, dtype=precision, non_blocking=True))
         del weights
 
     model.tokenizer = tokenizer
@@ -286,6 +304,7 @@ def load_fish_model_direct_gpu(checkpoint_dir, device="cuda", precision=torch.bf
     model.fixed_repetition_penalty = torch.tensor(1.5, device=device, dtype=torch.float)
     model.eval()
 
+    print(f"[Fish S2] ✅ Model parameters loaded into GPU VRAM!", flush=True)
     return model, decode_one_token_ar
 
 
