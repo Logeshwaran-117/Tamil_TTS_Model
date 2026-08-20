@@ -18,11 +18,8 @@ import numpy as np
 
 # Cache directory configuration
 CACHE_ROOT = os.path.abspath("cache")
-os.environ["HF_HOME"] = os.path.join(CACHE_ROOT, "huggingface")
 os.environ["PIP_CACHE_DIR"] = os.path.join(CACHE_ROOT, "pip")
 os.environ["TORCH_HOME"] = os.path.join(CACHE_ROOT, "torch")
-os.environ["TRANSFORMERS_CACHE"] = os.path.join(CACHE_ROOT, "huggingface")
-os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join(CACHE_ROOT, "huggingface")
 
 import torch
 import soundfile as sf

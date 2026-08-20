@@ -21,11 +21,8 @@ if sys.stdout.encoding != 'utf-8':
 
 # Enforce cache configuration
 CACHE_ROOT = os.path.abspath("cache")
-os.environ["HF_HOME"] = os.path.join(CACHE_ROOT, "huggingface")
 os.environ["PIP_CACHE_DIR"] = os.path.join(CACHE_ROOT, "pip")
 os.environ["TORCH_HOME"] = os.path.join(CACHE_ROOT, "torch")
-os.environ["TRANSFORMERS_CACHE"] = os.path.join(CACHE_ROOT, "huggingface")
-os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join(CACHE_ROOT, "huggingface")
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import io
@@ -240,9 +237,26 @@ def load_fish_speech_s2_pipeline():
             print("=======================================================", flush=True)
 
             if not os.path.exists(os.path.join(S2_PRO_DIR, "codec.pth")):
-                from huggingface_hub import snapshot_download
-                print("[Fish S2] Downloading s2-pro weights from Hugging Face...", flush=True)
-                snapshot_download(repo_id="fishaudio/s2-pro", local_dir=S2_PRO_DIR, local_dir_use_symlinks=False)
+                print("[Fish S2] Downloading s2-pro weights directly...", flush=True)
+                os.makedirs(S2_PRO_DIR, exist_ok=True)
+                base_url = "https://huggingface.co/fishaudio/s2-pro/resolve/main"
+                model_files = [
+                    "config.json",
+                    "model.safetensors.index.json",
+                    "model-00001-of-00002.safetensors",
+                    "model-00002-of-00002.safetensors",
+                    "codec.pth",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "special_tokens_map.json"
+                ]
+                for mf in model_files:
+                    dest = os.path.join(S2_PRO_DIR, mf)
+                    if not os.path.exists(dest):
+                        print(f"  📥 Fetching {mf}...", flush=True)
+                        req = urllib.request.Request(f"{base_url}/{mf}", headers={"User-Agent": "Mozilla/5.0"})
+                        with urllib.request.urlopen(req) as resp, open(dest, "wb") as out_file:
+                            shutil.copyfileobj(resp, out_file)
 
             precision = torch.bfloat16 if device == "cuda" else torch.float32
             fish_model, fish_decode_func = init_model(S2_PRO_DIR, device=device, precision=precision, compile=False)
