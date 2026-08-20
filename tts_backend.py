@@ -573,7 +573,9 @@ def list_voices():
             "gender": v["gender"],
             "icon": v["icon"],
             "style": v["default_style"],
-            "is_custom": v["is_custom"]
+            "is_custom": v["is_custom"],
+            "sample_url": f"/voice_sample/{k}",
+            "sample_text": v.get("text", "")
         })
 
     emotion_list = []
@@ -589,6 +591,17 @@ def list_voices():
         "emotions": emotion_list,
         "default_voice": "female_1" if "female_1" in voices else (list(voices.keys())[0] if voices else "")
     })
+
+
+@app.route("/voice_sample/<voice_key>", methods=["GET"])
+def get_voice_sample(voice_key):
+    """Serves reference audio sample for a given speaker voice profile."""
+    from flask import send_file
+    voices = get_available_voices()
+    if voice_key not in voices or not os.path.exists(voices[voice_key]["path"]):
+        return jsonify({"error": f"Voice sample '{voice_key}' not found"}), 404
+
+    return send_file(voices[voice_key]["path"], mimetype="audio/wav")
 
 
 @app.route("/transcribe", methods=["POST"])

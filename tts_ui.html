@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Fish Speech S2 — Tamil TTS Studio & Voice Cloning</title>
+  <title>Indic F5 — Tamil Neural TTS Studio & Voice Cloning</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -227,6 +227,66 @@
     .voice-selector-btn:hover {
       background: #f1f5f9;
       border-color: #cbd5e1;
+    }
+
+    .btn-preview-sample {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: #334155;
+      padding: 5px 10px;
+      border-radius: 16px;
+      font-size: 0.74rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-preview-sample:hover {
+      background: #f1f5f9;
+      color: #0f172a;
+      border-color: #cbd5e1;
+    }
+    .btn-preview-sample.playing {
+      background: #e0e7ff;
+      border-color: #c7d2fe;
+      color: #4338ca;
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+    }
+
+    .btn-item-preview {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: #475569;
+      font-size: 0.7rem;
+      transition: all 0.15s ease;
+      margin-left: 6px;
+      flex-shrink: 0;
+    }
+    .btn-item-preview:hover {
+      background: #e2e8f0;
+      color: #0f172a;
+      transform: scale(1.1);
+    }
+    .btn-item-preview.playing {
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      color: #ffffff;
+      border: none;
+      box-shadow: 0 2px 6px rgba(99, 102, 241, 0.4);
+      animation: pulse-playing 1.2s infinite;
+    }
+    @keyframes pulse-playing {
+      0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.5); }
+      70% { transform: scale(1.06); box-shadow: 0 0 0 6px rgba(99, 102, 241, 0); }
+      100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
     }
 
     .avatar-circle {
@@ -673,7 +733,7 @@
         <div class="controls-left">
           <!-- Model Badge -->
           <div class="model-badge">
-            <span>🐟 Fish Speech S2</span>
+            <span>🇮🇳 Indic F5 (24kHz)</span>
           </div>
 
           <!-- Voice Selector Dropdown -->
@@ -681,6 +741,11 @@
             <div class="avatar-circle" id="currentAvatar">👩</div>
             <span id="currentVoiceName">Female 1 (Narrator)</span>
             <span style="color: #94a3b8; font-size: 0.7rem;">▾</span>
+          </button>
+
+          <!-- Voice Sample Preview Button -->
+          <button class="btn-preview-sample" id="btnPreviewSelected" title="Play reference audio sample for current voice">
+            <span id="previewSelectedIcon">▶</span> Sample
           </button>
 
           <!-- Clone Voice Trigger Button -->
@@ -898,6 +963,70 @@
       }
     }
 
+    // Audio preview management
+    let currentPreviewAudio = null;
+    let currentPlayingBtn = null;
+
+    function stopCurrentPreview() {
+      if (currentPreviewAudio) {
+        currentPreviewAudio.pause();
+        currentPreviewAudio.currentTime = 0;
+        currentPreviewAudio = null;
+      }
+      if (currentPlayingBtn) {
+        currentPlayingBtn.classList.remove("playing");
+        const iconSpan = currentPlayingBtn.querySelector(".preview-icon") || currentPlayingBtn.querySelector("#previewSelectedIcon");
+        if (iconSpan) iconSpan.textContent = "▶";
+        else currentPlayingBtn.innerHTML = "<span>▶</span>";
+        currentPlayingBtn = null;
+      }
+      const btnPrevSelected = document.getElementById("btnPreviewSelected");
+      if (btnPrevSelected) {
+        btnPrevSelected.classList.remove("playing");
+        const icon = document.getElementById("previewSelectedIcon");
+        if (icon) icon.textContent = "▶";
+      }
+    }
+
+    function playVoicePreview(voiceKey, triggerBtn) {
+      if (currentPlayingBtn === triggerBtn && currentPreviewAudio && !currentPreviewAudio.paused) {
+        stopCurrentPreview();
+        return;
+      }
+
+      stopCurrentPreview();
+
+      const audio = new Audio(`${API_BASE}/voice_sample/${encodeURIComponent(voiceKey)}?t=${Date.now()}`);
+      currentPreviewAudio = audio;
+      currentPlayingBtn = triggerBtn;
+
+      if (triggerBtn) {
+        triggerBtn.classList.add("playing");
+        const iconSpan = triggerBtn.querySelector(".preview-icon") || triggerBtn.querySelector("#previewSelectedIcon");
+        if (iconSpan) iconSpan.textContent = "⏸";
+        else triggerBtn.innerHTML = "<span>⏸</span>";
+      }
+
+      audio.play().catch(err => {
+        console.warn("Audio preview error:", err);
+        stopCurrentPreview();
+      });
+
+      audio.onended = stopCurrentPreview;
+      audio.onerror = () => {
+        console.warn("Could not load preview sample for", voiceKey);
+        stopCurrentPreview();
+      };
+    }
+
+    const btnPreviewSelected = document.getElementById("btnPreviewSelected");
+    if (btnPreviewSelected) {
+      btnPreviewSelected.addEventListener("click", (e) => {
+        e.stopPropagation();
+        playVoicePreview(selectedVoice, btnPreviewSelected);
+      });
+    }
+
     function renderVoiceList() {
       voiceListContainer.innerHTML = "";
       activeVoices.forEach(v => {
@@ -907,7 +1036,7 @@
         item.dataset.name = v.label;
         item.dataset.icon = v.icon;
 
-        const customBadge = v.is_custom ? `<span class="item-badge">Custom Cloned</span>` : "";
+        const customBadge = v.is_custom ? `<span class="item-badge">Custom</span>` : "";
 
         item.innerHTML = `
           <span class="item-avatar">${v.icon}</span>
@@ -915,9 +1044,19 @@
             <span class="item-name">${v.label} ${customBadge}</span>
             <span class="item-sub">${v.gender}, ${v.style || "Natural"}</span>
           </div>
+          <button class="btn-item-preview" data-voice="${v.key}" title="Listen to voice sample of ${v.label}">
+            <span class="preview-icon">▶</span>
+          </button>
         `;
 
+        const previewBtn = item.querySelector(".btn-item-preview");
+        previewBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          playVoicePreview(v.key, previewBtn);
+        });
+
         item.addEventListener("click", () => {
+          stopCurrentPreview();
           document.querySelectorAll(".dropdown-item").forEach(i => i.classList.remove("active"));
           item.classList.add("active");
           selectedVoice = v.key;
