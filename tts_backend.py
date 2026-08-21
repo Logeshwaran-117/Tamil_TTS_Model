@@ -661,9 +661,16 @@ def translate_api():
 @app.route("/clone_voice", methods=["POST"])
 def clone_voice():
     """Upload 1 or more voice clips to dynamically create/fine-tune a cloned voice profile."""
-    audio_files = request.files.getlist("audio_files") or request.files.getlist("audio")
+    audio_files = []
+    if "audio_files" in request.files:
+        audio_files = request.files.getlist("audio_files")
+    elif "audio" in request.files:
+        audio_files = request.files.getlist("audio")
+
+    # Filter out empty entries
+    audio_files = [f for f in audio_files if f and f.filename]
     if not audio_files:
-        return jsonify({"error": "No audio files uploaded"}), 400
+        return jsonify({"error": "No audio files uploaded. Please select at least 1 audio clip."}), 400
 
     voice_name = request.form.get("name", "").strip()
     voice_gender = request.form.get("gender", "neutral")
@@ -702,9 +709,6 @@ def clone_voice():
     all_transcripts = []
 
     for idx, a_file in enumerate(audio_files, 1):
-        if not a_file.filename and len(audio_files) > 1:
-            continue
-
         raw_filename = a_file.filename or f"clip_{idx}.wav"
         save_name = f"{voice_id}_{idx:04d}.wav"
         local_path = os.path.join(spk_dir, save_name)
@@ -716,6 +720,15 @@ def clone_voice():
             data, sr = sf.read(local_path)
             if data.ndim > 1:
                 data = data.mean(axis=-1)
+            
+            # Resample to 24000Hz if needed
+            if sr != 24000:
+                import torchaudio.transforms as T
+                tensor_data = torch.from_numpy(data).float().unsqueeze(0)
+                resampler = T.Resample(orig_freq=sr, new_freq=24000)
+                data = resampler(tensor_data).squeeze(0).numpy()
+                sr = 24000
+
             duration = round(len(data) / sr, 2)
             sf.write(local_path, data, sr, format='WAV')
 
