@@ -813,6 +813,287 @@
       opacity: 0.6;
       cursor: not-allowed;
     }
+    /* History Section Styles */
+    .history-section {
+      margin-top: 28px;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 20px;
+      padding: 24px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.03);
+    }
+    .history-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #f1f5f9;
+      padding-bottom: 16px;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .history-title-box {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .history-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #0f172a;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .history-count-badge {
+      background: #eef2ff;
+      color: #4f46e5;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 12px;
+    }
+    .history-subtitle {
+      font-size: 0.76rem;
+      color: #64748b;
+    }
+    .history-actions-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .history-search-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .history-search-input {
+      padding: 6px 12px 6px 30px;
+      border: 1px solid #cbd5e1;
+      border-radius: 16px;
+      font-size: 0.78rem;
+      font-family: inherit;
+      outline: none;
+      width: 200px;
+      transition: all 0.15s ease;
+      background: #f8fafc;
+    }
+    .history-search-input:focus {
+      width: 240px;
+      border-color: #6366f1;
+      background: #ffffff;
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.12);
+    }
+    .search-icon {
+      position: absolute;
+      left: 10px;
+      font-size: 0.75rem;
+      color: #94a3b8;
+      pointer-events: none;
+    }
+    .btn-clear-history {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #b91c1c;
+      padding: 6px 12px;
+      border-radius: 16px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s ease;
+    }
+    .btn-clear-history:hover {
+      background: #fee2e2;
+      border-color: #fca5a5;
+    }
+
+    .history-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 14px;
+    }
+    @media (max-width: 640px) {
+      .history-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .history-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 10px;
+      transition: all 0.15s ease;
+    }
+    .history-card:hover {
+      background: #ffffff;
+      border-color: #cbd5e1;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.04);
+      transform: translateY(-1px);
+    }
+
+    .history-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .history-spk-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #0f172a;
+    }
+    .history-meta-tags {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .hist-tag {
+      font-size: 0.65rem;
+      padding: 2px 6px;
+      border-radius: 8px;
+      font-weight: 600;
+      background: #e2e8f0;
+      color: #475569;
+    }
+    .hist-tag.emotion {
+      background: #e0f2fe;
+      color: #0369a1;
+    }
+    .history-time {
+      font-size: 0.68rem;
+      color: #94a3b8;
+    }
+
+    .history-card-text {
+      font-size: 0.86rem;
+      color: #1e293b;
+      line-height: 1.5;
+      max-height: 60px;
+      overflow-y: auto;
+      background: #ffffff;
+      border: 1px solid #f1f5f9;
+      padding: 6px 8px;
+      border-radius: 8px;
+      scrollbar-width: thin;
+    }
+    .history-card-audio {
+      width: 100%;
+      height: 32px;
+      border-radius: 8px;
+    }
+    .history-card-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 6px;
+      border-top: 1px solid #f1f5f9;
+    }
+    .hist-btn-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-hist-action {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      color: #334155;
+      padding: 3px 8px;
+      border-radius: 10px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s ease;
+    }
+    .btn-hist-action:hover {
+      background: #f1f5f9;
+      color: #0f172a;
+    }
+    .btn-hist-action.delete {
+      color: #ef4444;
+      border-color: #fecaca;
+    }
+    .btn-hist-action.delete:hover {
+      background: #fef2f2;
+      color: #b91c1c;
+    }
+
+    /* History Pagination */
+    .history-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 20px;
+      padding-top: 14px;
+      border-top: 1px solid #f1f5f9;
+    }
+    .btn-page {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      color: #334155;
+      padding: 5px 12px;
+      border-radius: 14px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-page:hover:not(:disabled) {
+      background: #e2e8f0;
+      color: #0f172a;
+    }
+    .btn-page:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .page-numbers {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .page-num-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #475569;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s ease;
+    }
+    .page-num-btn.active {
+      background: #4f46e5;
+      color: #ffffff;
+      border-color: #4f46e5;
+      box-shadow: 0 2px 6px rgba(99, 102, 241, 0.3);
+    }
+    .history-empty-state {
+      text-align: center;
+      padding: 30px 16px;
+      color: #94a3b8;
+      font-size: 0.84rem;
+    }
   </style>
 </head>
 <body>
@@ -956,6 +1237,41 @@
       <a id="downloadBtn" class="download-btn" href="#" download="tamil_speech.wav">
         ⬇️ Download WAV
       </a>
+    </div>
+
+    <!-- Persistent Generation History & Demo Studio -->
+    <div class="history-section" id="historySection">
+      <div class="history-header">
+        <div class="history-title-box">
+          <div class="history-title">
+            <span>📜 Demo Audio History</span>
+            <span class="history-count-badge" id="historyTotalBadge">0 Audios</span>
+          </div>
+          <div class="history-subtitle">Listen anytime, download WAV, or reload into editor for live demos with your TL</div>
+        </div>
+
+        <div class="history-actions-bar">
+          <div class="history-search-wrapper">
+            <span class="search-icon">🔍</span>
+            <input type="text" class="history-search-input" id="historySearchInput" placeholder="Filter by Tamil text or voice..." />
+          </div>
+          <button class="btn-clear-history" id="btnClearHistory" title="Delete all generated demo audios">
+            🗑️ Clear History
+          </button>
+        </div>
+      </div>
+
+      <!-- History Items Container -->
+      <div class="history-grid" id="historyGrid">
+        <!-- Dynamically rendered from /history -->
+      </div>
+
+      <!-- Pagination Controls -->
+      <div class="history-pagination" id="historyPagination" style="display: none;">
+        <button class="btn-page" id="btnPagePrev" disabled>◀ Previous</button>
+        <div class="page-numbers" id="pageNumbersContainer"></div>
+        <button class="btn-page" id="btnPageNext">Next ▶</button>
+      </div>
     </div>
   </div>
 
@@ -1654,6 +1970,7 @@
         audioElement.play();
         statusEl.textContent = `✅ Generated successfully in ${secondsElapsed}s!`;
         statusEl.className = "success";
+        loadHistory();
       } catch (err) {
         statusEl.textContent = `❌ ${err.message}`;
         statusEl.className = "error";
@@ -1692,8 +2009,201 @@
       }
     });
 
+    // Generation History Management
+    let currentHistoryPage = 1;
+    const historyLimit = 6;
+    let currentHistorySearch = "";
+
+    const historyTotalBadge = document.getElementById("historyTotalBadge");
+    const historySearchInput = document.getElementById("historySearchInput");
+    const btnClearHistory = document.getElementById("btnClearHistory");
+    const historyGrid = document.getElementById("historyGrid");
+    const historyPagination = document.getElementById("historyPagination");
+    const btnPagePrev = document.getElementById("btnPagePrev");
+    const btnPageNext = document.getElementById("btnPageNext");
+    const pageNumbersContainer = document.getElementById("pageNumbersContainer");
+
+    async function loadHistory() {
+      try {
+        const url = `${API_BASE}/history?page=${currentHistoryPage}&limit=${historyLimit}&search=${encodeURIComponent(currentHistorySearch)}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("Could not load history");
+        const data = await res.json();
+        renderHistory(data);
+      } catch (err) {
+        console.warn("History load error:", err);
+      }
+    }
+
+    function renderHistory(data) {
+      const items = data.items || [];
+      const total = data.total || 0;
+      const totalPages = data.total_pages || 1;
+      const page = data.page || 1;
+
+      historyTotalBadge.textContent = `${total} ${total === 1 ? 'Audio' : 'Audios'}`;
+      historyGrid.innerHTML = "";
+
+      if (items.length === 0) {
+        historyGrid.innerHTML = `
+          <div class="history-empty-state" style="grid-column: 1 / -1;">
+            <div style="font-size: 1.8rem; margin-bottom: 6px;">🎙️</div>
+            <div>${currentHistorySearch ? 'No audios match your search filter.' : 'No audios generated yet. Click "↑ Generate Speech" above to create your first demo!'}</div>
+          </div>
+        `;
+        historyPagination.style.display = "none";
+        return;
+      }
+
+      items.forEach(item => {
+        const card = document.createElement("div");
+        card.className = "history-card";
+        card.dataset.id = item.id;
+
+        const audioUrl = item.audio_url ? `${API_BASE}${item.audio_url}` : "";
+
+        card.innerHTML = `
+          <div class="history-card-header">
+            <div class="history-spk-badge">
+              <span>${item.voice_icon || '🎙️'}</span>
+              <span>${item.voice_label || item.voice_key || 'Speaker'}</span>
+            </div>
+            <div class="history-meta-tags">
+              <span class="hist-tag emotion">${item.emotion || 'neutral'}</span>
+              <span class="hist-tag">${item.speed || 1.0}x</span>
+              <span class="history-time">${item.timestamp ? item.timestamp.split(' ')[1] : ''}</span>
+            </div>
+          </div>
+
+          <div class="history-card-text" title="${item.text || ''}">
+            ${item.text || ''}
+          </div>
+
+          <audio class="history-card-audio" controls src="${audioUrl}" preload="none"></audio>
+
+          <div class="history-card-actions">
+            <span style="font-size: 0.7rem; color: #94a3b8;">${item.duration ? item.duration + 's' : ''}</span>
+            <div class="hist-btn-group">
+              <button class="btn-hist-action btn-reuse-text" title="Load text & voice into editor">
+                <span>📝 Use in Editor</span>
+              </button>
+              <a class="btn-hist-action" href="${audioUrl}" download="${item.voice_key || 'demo'}_speech.wav" title="Download WAV audio">
+                <span>⬇️</span>
+              </a>
+              <button class="btn-hist-action delete btn-delete-item" title="Delete this audio">
+                <span>🗑️</span>
+              </button>
+            </div>
+          </div>
+        `;
+
+        // Reuse button
+        const btnReuse = card.querySelector(".btn-reuse-text");
+        btnReuse.addEventListener("click", () => {
+          textInput.value = item.text || item.original_text || "";
+          if (item.voice_key) {
+            selectedVoice = item.voice_key;
+            currentAvatar.textContent = item.voice_icon || "🎙️";
+            currentVoiceName.textContent = item.voice_label || item.voice_key;
+            document.querySelectorAll(".dropdown-item").forEach(i => {
+              if (i.dataset.voice === item.voice_key) i.classList.add("active");
+              else i.classList.remove("active");
+            });
+          }
+          if (item.speed) {
+            speedSlider.value = item.speed;
+            speedDisplay.textContent = `${item.speed}x`;
+          }
+          if (item.emotion) {
+            emotionSelect.value = item.emotion;
+          }
+          window.scrollTo({ top: 0, behavior: "smooth" });
+          statusEl.textContent = `📝 Loaded demo text & settings into editor!`;
+          statusEl.className = "success";
+        });
+
+        // Delete button
+        const btnDel = card.querySelector(".btn-delete-item");
+        btnDel.addEventListener("click", async () => {
+          if (!confirm("Delete this generated demo audio?")) return;
+          try {
+            const res = await fetch(`${API_BASE}/history/${item.id}`, { method: "DELETE" });
+            if (res.ok) {
+              loadHistory();
+            }
+          } catch (err) {
+            alert("Could not delete item: " + err.message);
+          }
+        });
+
+        historyGrid.appendChild(card);
+      });
+
+      // Render Pagination
+      if (totalPages > 1) {
+        historyPagination.style.display = "flex";
+        btnPagePrev.disabled = page <= 1;
+        btnPageNext.disabled = page >= totalPages;
+
+        pageNumbersContainer.innerHTML = "";
+        for (let p = 1; p <= totalPages; p++) {
+          const pBtn = document.createElement("button");
+          pBtn.className = `page-num-btn ${p === page ? 'active' : ''}`;
+          pBtn.textContent = p;
+          pBtn.addEventListener("click", () => {
+            currentHistoryPage = p;
+            loadHistory();
+          });
+          pageNumbersContainer.appendChild(pBtn);
+        }
+      } else {
+        historyPagination.style.display = "none";
+      }
+    }
+
+    // Pagination handlers
+    btnPagePrev.addEventListener("click", () => {
+      if (currentHistoryPage > 1) {
+        currentHistoryPage--;
+        loadHistory();
+      }
+    });
+
+    btnPageNext.addEventListener("click", () => {
+      currentHistoryPage++;
+      loadHistory();
+    });
+
+    // History search input
+    let searchDebounce = null;
+    historySearchInput.addEventListener("input", () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        currentHistorySearch = historySearchInput.value.trim();
+        currentHistoryPage = 1;
+        loadHistory();
+      }, 300);
+    });
+
+    // Clear all history
+    btnClearHistory.addEventListener("click", async () => {
+      if (!confirm("Are you sure you want to delete ALL generated demo audios? This cannot be undone.")) return;
+      try {
+        const res = await fetch(`${API_BASE}/history`, { method: "DELETE" });
+        if (res.ok) {
+          currentHistoryPage = 1;
+          loadHistory();
+          statusEl.textContent = "🗑️ All demo history cleared.";
+          statusEl.className = "";
+        }
+      } catch (err) {
+        alert("Could not clear history: " + err.message);
+      }
+    });
+
     // Initial load
     loadVoices();
+    loadHistory();
   </script>
 </body>
 </html>

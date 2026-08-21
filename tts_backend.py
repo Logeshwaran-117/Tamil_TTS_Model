@@ -806,9 +806,129 @@ def clone_voice():
     })
 
 
+OUTPUT_DIR = "generated_audios"
+HISTORY_FILE = os.path.join(OUTPUT_DIR, "history.json")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+def load_history():
+    """Load generation history list from history.json."""
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+
+def save_history(history_list):
+    """Save generation history list to history.json."""
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(history_list, f, ensure_ascii=False, indent=2)
+
+
+@app.route("/history", methods=["GET"])
+def get_history():
+    """Returns paginated generation history with optional search filtering."""
+    import math
+    page = int(request.args.get("page", 1))
+    limit = int(request.args.get("limit", 6))
+    search = request.args.get("search", "").strip().lower()
+
+    all_items = load_history()
+
+    if search:
+        all_items = [
+            item for item in all_items
+            if search in item.get("text", "").lower()
+            or search in item.get("original_text", "").lower()
+            or search in item.get("voice_label", "").lower()
+            or search in item.get("voice_key", "").lower()
+        ]
+
+    total = len(all_items)
+    total_pages = max(1, math.ceil(total / limit)) if total > 0 else 1
+    page = max(1, min(page, total_pages))
+
+    start_idx = (page - 1) * limit
+    end_idx = start_idx + limit
+    paginated_items = all_items[start_idx:end_idx]
+
+    return jsonify({
+        "items": paginated_items,
+        "total": total,
+        "page": page,
+        "total_pages": total_pages,
+        "limit": limit
+    })
+
+
+@app.route("/history_audio/<filename>", methods=["GET"])
+def get_history_audio(filename):
+    """Serves generated audio from history."""
+    from flask import send_file
+    safe_filename = os.path.basename(filename)
+    audio_path = os.path.join(OUTPUT_DIR, safe_filename)
+    if not os.path.exists(audio_path):
+        return jsonify({"error": "Audio file not found"}), 404
+    return send_file(audio_path, mimetype="audio/wav")
+
+
+@app.route("/history/<item_id>", methods=["DELETE"])
+def delete_history_item(item_id):
+    """Deletes a specific generation from history and removes its audio file."""
+    all_items = load_history()
+    new_items = []
+    deleted_file = None
+
+    for item in all_items:
+        if item.get("id") == item_id:
+            deleted_file = item.get("filename")
+        else:
+            new_items.append(item)
+
+    if deleted_file:
+        file_path = os.path.join(OUTPUT_DIR, deleted_file)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+
+    save_history(new_items)
+    return jsonify({
+        "success": True,
+        "message": f"Deleted item {item_id}",
+        "remaining_count": len(new_items)
+    })
+
+
+@app.route("/history", methods=["DELETE"])
+def clear_all_history():
+    """Clears all history records and deletes all saved audio files in output directory."""
+    all_items = load_history()
+    for item in all_items:
+        fn = item.get("filename")
+        if fn:
+            fp = os.path.join(OUTPUT_DIR, fn)
+            if os.path.exists(fp):
+                try:
+                    os.remove(fp)
+                except Exception:
+                    pass
+
+    save_history([])
+    return jsonify({
+        "success": True,
+        "message": "All generation history and demo audio files cleared successfully!"
+    })
+
+
 @app.route("/generate", methods=["POST"])
 def generate():
-    """Generates Tamil speech audio."""
+    """Generates Tamil speech audio and saves record into persistent history."""
     data = request.json or {}
     text = (data.get("text") or "").strip()
     voice_key = data.get("voice", "female_1")
@@ -846,18 +966,62 @@ def generate():
             emotion=emotion
         )
         b64 = base64.b64encode(audio_bytes).decode("utf-8")
+
+        # Save to persistent history for TL demos & replay
+        gen_timestamp = int(time.time() * 1000)
+        item_id = f"gen_{gen_timestamp}"
+        audio_filename = f"{item_id}_{voice_key}.wav"
+        audio_filepath = os.path.join(OUTPUT_DIR, audio_filename)
+
+        with open(audio_filepath, "wb") as f:
+            f.write(audio_bytes)
+
+        duration = round(len(audio_bytes) / (24000 * 2), 2)
+        try:
+            wav_data, wav_sr = sf.read(audio_filepath)
+            duration = round(len(wav_data) / wav_sr, 2)
+        except Exception:
+            pass
+
+        history_item = {
+            "id": item_id,
+            "filename": audio_filename,
+            "audio_url": f"/history_audio/{audio_filename}",
+            "text": processed_text,
+            "original_text": text,
+            "voice_key": voice_key,
+            "voice_label": voice.get("label", voice_key),
+            "voice_icon": voice.get("icon", "🎙️"),
+            "speed": speed,
+            "quality": quality,
+            "stability": stability,
+            "emotion": emotion,
+            "duration": duration,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "created_at": gen_timestamp
+        }
+
+        history_list = load_history()
+        history_list.insert(0, history_item)
+        save_history(history_list)
+
         return jsonify({
             "audio_b64": b64,
+            "audio_url": f"/history_audio/{audio_filename}",
             "voice": voice_key,
             "voice_label": voice["label"],
             "speed": speed,
             "quality": quality,
             "stability": stability,
             "emotion": emotion,
-            "transliterated_text": processed_text
+            "transliterated_text": processed_text,
+            "duration": duration,
+            "history_item": history_item
         })
     except Exception as e:
         import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 

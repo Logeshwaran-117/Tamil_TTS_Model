@@ -6,5 +6,13 @@
     "default_style": "Custom Cloned",
     "samples_count": 1,
     "created_at": "2026-08-20 15:18:18"
+  },
+  "custom_nikhil": {
+    "label": "nikhil",
+    "gender": "female",
+    "icon": "🎙️",
+    "default_style": "Natural",
+    "sample_count": 5,
+    "created_at": "2026-08-21 10:30:39"
   }
 }
