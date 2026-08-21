@@ -532,10 +532,145 @@
       background: #ffffff;
       border-radius: 20px;
       width: 100%;
-      max-width: 520px;
+      max-width: 560px;
+      max-height: 88vh;
+      overflow-y: auto;
       box-shadow: 0 20px 40px rgba(0,0,0,0.15);
       padding: 24px;
       position: relative;
+    }
+
+    /* Multi-Audio Sample Cards */
+    .audio-samples-wrapper {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .multi-controls-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+    .btn-multi-action {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      color: #334155;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s ease;
+    }
+    .btn-multi-action:hover {
+      background: #f1f5f9;
+      color: #0f172a;
+      border-color: #94a3b8;
+    }
+    .btn-multi-action.primary {
+      background: #eef2ff;
+      border-color: #c7d2fe;
+      color: #4338ca;
+    }
+    .btn-multi-action.primary:hover {
+      background: #e0e7ff;
+    }
+
+    .audio-sample-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 10px 12px;
+      transition: all 0.15s ease;
+    }
+    .audio-sample-card:hover {
+      border-color: #cbd5e1;
+      background: #ffffff;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+    }
+    .sample-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #334155;
+    }
+    .sample-badge {
+      background: #e0f2fe;
+      color: #0369a1;
+      font-size: 0.68rem;
+      padding: 2px 7px;
+      border-radius: 10px;
+    }
+    .btn-card-transcribe {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      color: #475569;
+      font-size: 0.7rem;
+      padding: 2px 8px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.15s ease;
+    }
+    .btn-card-transcribe:hover {
+      background: #f1f5f9;
+      color: #0f172a;
+    }
+    .sample-audio-mini {
+      width: 100%;
+      height: 32px;
+      margin-bottom: 6px;
+      border-radius: 6px;
+    }
+    .clip-transcript-input {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s ease;
+      background: #ffffff;
+    }
+    .clip-transcript-input:focus {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+    }
+
+    .bulk-paste-box {
+      display: none;
+      margin-top: 6px;
+      margin-bottom: 10px;
+    }
+    .bulk-paste-box.show {
+      display: block;
+    }
+    .bulk-paste-textarea {
+      width: 100%;
+      min-height: 80px;
+      padding: 8px 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-family: inherit;
+      resize: vertical;
+      outline: none;
+      background: #ffffff;
+      line-height: 1.5;
+    }
+    .bulk-paste-textarea:focus {
+      border-color: #6366f1;
     }
     .modal-header {
       display: flex;
@@ -859,11 +994,11 @@
       </div>
 
       <div class="form-group">
-        <label class="form-label">Upload Sample Audio (1 or more .wav / .mp3 clips)</label>
+        <label class="form-label">Upload Sample Audio (1, 4, 5 or more .wav / .mp3 clips)</label>
         <div class="audio-dropzone" id="audioDropzone">
           <div style="font-size: 1.5rem; margin-bottom: 4px;">📁</div>
           <div style="font-size: 0.8rem; color: #475569; font-weight: 600;">Click or Drag Audio Sample(s) here</div>
-          <div style="font-size: 0.7rem; color: #94a3b8; margin-top: 2px;">(Supports 5-15 seconds clear sample audio)</div>
+          <div style="font-size: 0.7rem; color: #94a3b8; margin-top: 2px;">(Select 1 to 10 clear clips, e.g. 5–10s each)</div>
           <input type="file" id="cloneAudioFiles" multiple accept="audio/*" style="display: none;" />
         </div>
         <div id="selectedFilesSummary" style="font-size: 0.75rem; color: #166534; margin-top: 6px; font-weight: 600;"></div>
@@ -880,10 +1015,33 @@
         </button>
       </div>
 
-      <!-- Optional Transcript -->
-      <div class="form-group" style="margin-top: 12px;">
-        <label class="form-label">Sample Speech Transcript (Optional - Whisper will auto-transcribe if empty)</label>
-        <input type="text" class="form-input" id="cloneTranscript" placeholder="வணக்கம், இது எனது மாதிரி குரல் பதிவு..." />
+      <!-- Multi-Audio Transcript Section -->
+      <div class="form-group" style="margin-top: 14px;">
+        <div class="multi-controls-bar">
+          <label class="form-label" style="margin-bottom: 0;">Audio Transcripts</label>
+          <div style="display: flex; gap: 6px;">
+            <button class="btn-multi-action primary" id="btnAutoTranscribeAll" style="display: none;" title="Auto-transcribe all uploaded clips with Whisper">
+              <span>🤖 Transcribe All</span>
+            </button>
+            <button class="btn-multi-action" id="btnToggleBulkPaste" style="display: none;" title="Paste multiple lines at once">
+              <span>📋 Bulk Paste</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Bulk Paste Box -->
+        <div class="bulk-paste-box" id="bulkPasteBox">
+          <div style="font-size: 0.72rem; color: #64748b; margin-bottom: 4px;">Paste all sentences below (one transcript per line) — it will automatically match each audio clip:</div>
+          <textarea class="bulk-paste-textarea" id="bulkPasteText" placeholder="Sample 1 transcript in Tamil&#10;Sample 2 transcript in Tamil&#10;Sample 3 transcript in Tamil..."></textarea>
+        </div>
+
+        <!-- Default Single Transcript (When 0 or 1 file is selected) -->
+        <div id="singleTranscriptWrapper">
+          <input type="text" class="form-input" id="cloneTranscript" placeholder="வணக்கம், இது எனது மாதிரி குரல் பதிவு... (Optional - Whisper will auto-transcribe if empty)" />
+        </div>
+
+        <!-- Dynamic Multi-Sample Cards List -->
+        <div class="audio-samples-wrapper" id="audioSamplesListContainer" style="display: none;"></div>
       </div>
 
       <button class="btn-clone-submit" id="btnSubmitClone">
@@ -1095,12 +1253,136 @@
       });
     });
 
+    // Dynamic Multi-Audio Sample Management
+    const singleTranscriptWrapper = document.getElementById("singleTranscriptWrapper");
+    const audioSamplesListContainer = document.getElementById("audioSamplesListContainer");
+    const btnAutoTranscribeAll = document.getElementById("btnAutoTranscribeAll");
+    const btnToggleBulkPaste = document.getElementById("btnToggleBulkPaste");
+    const bulkPasteBox = document.getElementById("bulkPasteBox");
+    const bulkPasteText = document.getElementById("bulkPasteText");
+    let currentUploadedFiles = [];
+
+    // Render multi-audio file list
+    function renderAudioSamplesList(files) {
+      currentUploadedFiles = Array.from(files);
+      if (currentUploadedFiles.length > 1) {
+        singleTranscriptWrapper.style.display = "none";
+        audioSamplesListContainer.style.display = "flex";
+        btnAutoTranscribeAll.style.display = "flex";
+        btnToggleBulkPaste.style.display = "flex";
+        audioSamplesListContainer.innerHTML = "";
+
+        currentUploadedFiles.forEach((file, index) => {
+          const card = document.createElement("div");
+          card.className = "audio-sample-card";
+          card.dataset.index = index;
+
+          const objectUrl = URL.createObjectURL(file);
+          const sizeKb = Math.round(file.size / 1024);
+
+          card.innerHTML = `
+            <div class="sample-card-header">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span class="sample-badge">Sample ${index + 1}</span>
+                <span style="max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${file.name} (${sizeKb} KB)</span>
+              </div>
+              <button class="btn-card-transcribe" data-index="${index}">🤖 Transcribe</button>
+            </div>
+            <audio class="sample-audio-mini" controls src="${objectUrl}"></audio>
+            <input type="text" class="clip-transcript-input" data-index="${index}" placeholder="Type or paste Tamil transcript for sample ${index + 1}..." />
+          `;
+
+          const btnTrans = card.querySelector(".btn-card-transcribe");
+          btnTrans.addEventListener("click", async (e) => {
+            e.preventDefault();
+            btnTrans.disabled = true;
+            btnTrans.textContent = "⏳ Transcribing...";
+            try {
+              const trans = await transcribeAudioFile(file);
+              const inputEl = card.querySelector(".clip-transcript-input");
+              if (inputEl) inputEl.value = trans;
+              btnTrans.textContent = "✓ Done";
+            } catch (err) {
+              btnTrans.textContent = "❌ Failed";
+            } finally {
+              setTimeout(() => { btnTrans.disabled = false; btnTrans.textContent = "🤖 Transcribe"; }, 2000);
+            }
+          });
+
+          audioSamplesListContainer.appendChild(card);
+        });
+      } else {
+        singleTranscriptWrapper.style.display = "block";
+        audioSamplesListContainer.style.display = "none";
+        btnAutoTranscribeAll.style.display = "none";
+        btnToggleBulkPaste.style.display = "none";
+        bulkPasteBox.classList.remove("show");
+        audioSamplesListContainer.innerHTML = "";
+      }
+    }
+
+    // Single file transcription helper
+    async function transcribeAudioFile(fileBlob) {
+      const fd = new FormData();
+      fd.append("audio", fileBlob);
+      const res = await fetch(`${API_BASE}/transcribe`, { method: "POST", body: fd });
+      const data = await res.json();
+      return data.transcript || "வணக்கம்";
+    }
+
+    // Toggle Bulk Paste Box
+    btnToggleBulkPaste.addEventListener("click", (e) => {
+      e.preventDefault();
+      bulkPasteBox.classList.toggle("show");
+    });
+
+    // Handle Bulk Paste input
+    bulkPasteText.addEventListener("input", () => {
+      const lines = bulkPasteText.value.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+      const inputs = audioSamplesListContainer.querySelectorAll(".clip-transcript-input");
+      inputs.forEach((inp, idx) => {
+        if (idx < lines.length) {
+          inp.value = lines[idx];
+        }
+      });
+    });
+
+    // Auto-transcribe all uploaded clips
+    btnAutoTranscribeAll.addEventListener("click", async (e) => {
+      e.preventDefault();
+      if (!currentUploadedFiles.length) return;
+
+      btnAutoTranscribeAll.disabled = true;
+      btnAutoTranscribeAll.innerHTML = "⏳ Transcribing all clips...";
+      cloneModalStatus.textContent = "🤖 Auto-transcribing audio files with Whisper...";
+
+      const inputs = audioSamplesListContainer.querySelectorAll(".clip-transcript-input");
+      for (let i = 0; i < currentUploadedFiles.length; i++) {
+        cloneModalStatus.textContent = `Transcribing clip ${i + 1}/${currentUploadedFiles.length}...`;
+        try {
+          const trans = await transcribeAudioFile(currentUploadedFiles[i]);
+          if (inputs[i]) inputs[i].value = trans;
+        } catch (err) {
+          console.warn(`Could not transcribe clip ${i + 1}:`, err);
+        }
+      }
+
+      cloneModalStatus.textContent = "✅ All clips transcribed successfully!";
+      btnAutoTranscribeAll.disabled = false;
+      btnAutoTranscribeAll.innerHTML = "🤖 Transcribe All";
+    });
+
     // Audio File Dropzone
     audioDropzone.addEventListener("click", () => cloneAudioFiles.click());
     cloneAudioFiles.addEventListener("change", () => {
-      const count = cloneAudioFiles.files.length;
+      const files = cloneAudioFiles.files;
+      const count = files.length;
       if (count > 0) {
-        selectedFilesSummary.textContent = `✓ Selected ${count} audio file(s): ${Array.from(cloneAudioFiles.files).map(f=>f.name).join(", ")}`;
+        selectedFilesSummary.textContent = `✓ Selected ${count} audio file(s): ${Array.from(files).map(f=>f.name).join(", ")}`;
+        renderAudioSamplesList(files);
+      } else {
+        selectedFilesSummary.textContent = "";
+        renderAudioSamplesList([]);
       }
     });
 
@@ -1122,6 +1404,7 @@
           mediaRecorder.onstop = () => {
             recordedAudioBlob = new Blob(recordedChunks, { type: "audio/wav" });
             selectedFilesSummary.textContent = "✓ Microphone sample recorded ready for cloning!";
+            renderAudioSamplesList([]);
           };
           mediaRecorder.start();
           btnMicRecord.classList.add("recording");
@@ -1145,23 +1428,33 @@
       formData.append("name", name);
       formData.append("gender", cloneGender.value);
       formData.append("icon", selectedIcon);
-      formData.append("transcript", cloneTranscript.value.trim());
 
       const files = cloneAudioFiles.files;
+      const collectedTranscripts = [];
+
       if (files && files.length > 0) {
         for (let i = 0; i < files.length; i++) {
           formData.append("audio_files", files[i]);
         }
+
+        if (files.length > 1) {
+          const inputs = audioSamplesListContainer.querySelectorAll(".clip-transcript-input");
+          inputs.forEach(inp => collectedTranscripts.push(inp.value.trim()));
+          formData.append("transcripts_json", JSON.stringify(collectedTranscripts));
+        } else {
+          formData.append("transcript", cloneTranscript.value.trim());
+        }
       } else if (recordedAudioBlob) {
         formData.append("audio_files", recordedAudioBlob, "mic_recording.wav");
+        formData.append("transcript", cloneTranscript.value.trim());
       } else {
         alert("Please upload at least 1 audio file or record from microphone.");
         return;
       }
 
       btnSubmitClone.disabled = true;
-      btnSubmitClone.innerHTML = "⏳ Processing & Auto-Transcribing with Whisper...";
-      cloneModalStatus.textContent = "Standardizing audio and extracting acoustic voice features...";
+      btnSubmitClone.innerHTML = "⏳ Processing & Registering Multi-Sample Voice...";
+      cloneModalStatus.textContent = "Standardizing audio clips and saving to dataset...";
 
       try {
         const res = await fetch(`${API_BASE}/clone_voice`, {
@@ -1177,7 +1470,7 @@
         }
         if (!res.ok) throw new Error(data.error || "Cloning failed");
 
-        cloneModalStatus.textContent = "✅ Voice cloned successfully!";
+        cloneModalStatus.textContent = `✅ Cloned successfully with ${data.total_samples || 1} audio samples!`;
         await loadVoices();
         selectedVoice = data.voice_key;
         currentAvatar.textContent = data.icon;
@@ -1186,9 +1479,9 @@
 
         setTimeout(() => {
           closeModal();
-          statusEl.textContent = `🎉 Cloned '${data.label}' ready to speak!`;
+          statusEl.textContent = `🎉 Cloned '${data.label}' (${data.total_samples || 1} samples) ready to speak!`;
           statusEl.className = "success";
-        }, 800);
+        }, 1000);
       } catch (err) {
         cloneModalStatus.textContent = `❌ Error: ${err.message}`;
       } finally {

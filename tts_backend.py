@@ -660,14 +660,32 @@ def translate_api():
 
 @app.route("/clone_voice", methods=["POST"])
 def clone_voice():
-    """Upload new voice clip to dynamically create a cloned voice profile."""
-    if "audio" not in request.files:
-        return jsonify({"error": "No audio file uploaded"}), 400
+    """Upload 1 or more voice clips to dynamically create/fine-tune a cloned voice profile."""
+    audio_files = request.files.getlist("audio_files") or request.files.getlist("audio")
+    if not audio_files:
+        return jsonify({"error": "No audio files uploaded"}), 400
 
     voice_name = request.form.get("name", "").strip()
     voice_gender = request.form.get("gender", "neutral")
     voice_style = request.form.get("style", "Natural")
-    custom_transcript = request.form.get("transcript", "").strip()
+    voice_icon = request.form.get("icon", "🎙️")
+
+    # Transcripts can be passed as JSON list, multiple form fields, or newline-separated text
+    transcripts_raw = request.form.get("transcripts_json") or ""
+    transcripts_list = []
+    if transcripts_raw:
+        try:
+            transcripts_list = json.loads(transcripts_raw)
+        except Exception:
+            transcripts_list = []
+
+    if not transcripts_list:
+        transcripts_list = request.form.getlist("transcripts")
+
+    if not transcripts_list:
+        single_transcript = request.form.get("transcript", "").strip()
+        if single_transcript:
+            transcripts_list = [t.strip() for t in single_transcript.split("\n") if t.strip()]
 
     if not voice_name:
         voice_name = f"Custom Voice {int(time.time())}"
@@ -676,42 +694,88 @@ def clone_voice():
     spk_dir = os.path.join(DATASET_DIR, voice_id)
     os.makedirs(spk_dir, exist_ok=True)
 
-    audio_file = request.files["audio"]
-    ref_wav_path = os.path.join(spk_dir, "reference.wav")
-    audio_file.save(ref_wav_path)
+    train_wavs_dir = os.path.join("training_dataset", "wavs")
+    os.makedirs(train_wavs_dir, exist_ok=True)
+    meta_csv_path = os.path.join("training_dataset", "metadata.csv")
 
-    # Standardize audio
-    try:
-        data, sr = sf.read(ref_wav_path)
-        if data.ndim > 1:
-            data = data.mean(axis=-1)
-        sf.write(ref_wav_path, data, sr, format='WAV')
-    except Exception as e:
-        print(f"[Clone] Error standardizing audio: {e}", flush=True)
+    processed_samples = []
+    all_transcripts = []
 
-    # Transcript resolution
-    transcript = custom_transcript
-    if not transcript:
+    for idx, a_file in enumerate(audio_files, 1):
+        if not a_file.filename and len(audio_files) > 1:
+            continue
+
+        raw_filename = a_file.filename or f"clip_{idx}.wav"
+        save_name = f"{voice_id}_{idx:04d}.wav"
+        local_path = os.path.join(spk_dir, save_name)
+        a_file.save(local_path)
+
+        # Standardize audio to mono 24kHz
+        duration = 0.0
         try:
-            load_whisper()
-            if whisper_model is not None:
-                res = whisper_model.transcribe(ref_wav_path, language="ta")
-                transcript = res.get("text", "").strip()
+            data, sr = sf.read(local_path)
+            if data.ndim > 1:
+                data = data.mean(axis=-1)
+            duration = round(len(data) / sr, 2)
+            sf.write(local_path, data, sr, format='WAV')
+
+            # Also copy to training_dataset/wavs for fine-tuning
+            shutil.copy(local_path, os.path.join(train_wavs_dir, save_name))
+        except Exception as e:
+            print(f"[Clone] Error standardizing {save_name}: {e}", flush=True)
+
+        # Determine transcript
+        clip_transcript = ""
+        if idx - 1 < len(transcripts_list) and transcripts_list[idx - 1].strip():
+            clip_transcript = transcripts_list[idx - 1].strip()
+        else:
+            try:
+                load_whisper()
+                if whisper_model is not None:
+                    res = whisper_model.transcribe(local_path, language="ta")
+                    clip_transcript = res.get("text", "").strip()
+            except Exception as e:
+                print(f"[Clone] Whisper transcription warning for {save_name}: {e}", flush=True)
+
+        if not clip_transcript:
+            clip_transcript = "வணக்கம், இது எனது மாதிரி குரல் பதிவு."
+
+        all_transcripts.append(clip_transcript)
+        processed_samples.append({
+            "filename": save_name,
+            "original_name": raw_filename,
+            "transcript": clip_transcript,
+            "duration": duration
+        })
+
+        # Append to training_dataset/metadata.csv if exists
+        try:
+            if os.path.exists(meta_csv_path):
+                with open(meta_csv_path, "a", encoding="utf-8") as f:
+                    f.write(f"\n{save_name}|{clip_transcript}|{voice_id}|ta|{duration}")
         except Exception:
             pass
 
-    if not transcript:
-        transcript = "வணக்கம், இது எனது சொந்த குரல் பதிவு."
+    # Save primary reference.wav (best 5-10s or 1st clip)
+    ref_wav_dest = os.path.join(spk_dir, "reference.wav")
+    first_clip_path = os.path.join(spk_dir, processed_samples[0]["filename"])
+    shutil.copy(first_clip_path, ref_wav_dest)
 
+    primary_transcript = all_transcripts[0] if all_transcripts else "வணக்கம்"
     with open(os.path.join(spk_dir, "transcript.txt"), "w", encoding="utf-8") as f:
-        f.write(transcript)
+        f.write(primary_transcript)
+
+    # Save full sample transcripts manifest
+    with open(os.path.join(spk_dir, "samples_metadata.json"), "w", encoding="utf-8") as f:
+        json.dump(processed_samples, f, ensure_ascii=False, indent=2)
 
     meta = get_custom_voices_metadata()
     meta[voice_id] = {
         "label": voice_name,
         "gender": voice_gender,
-        "icon": "🎙️",
+        "icon": voice_icon,
         "default_style": voice_style,
+        "sample_count": len(processed_samples),
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
     }
     save_custom_voices_metadata(meta)
@@ -719,9 +783,13 @@ def clone_voice():
     return jsonify({
         "success": True,
         "voice_id": voice_id,
+        "voice_key": voice_id,
         "label": voice_name,
-        "transcript": transcript,
-        "message": f"Successfully created cloned speaker profile '{voice_name}'!"
+        "icon": voice_icon,
+        "transcript": primary_transcript,
+        "total_samples": len(processed_samples),
+        "samples": processed_samples,
+        "message": f"Successfully registered '{voice_name}' with {len(processed_samples)} audio samples & transcripts!"
     })
 
 
