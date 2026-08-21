@@ -967,7 +967,7 @@ def generate():
         )
         b64 = base64.b64encode(audio_bytes).decode("utf-8")
 
-        # Save to persistent history for TL demos & replay
+        # Save to persistent history for live preview & replay
         gen_timestamp = int(time.time() * 1000)
         item_id = f"gen_{gen_timestamp}"
         audio_filename = f"{item_id}_{voice_key}.wav"
